@@ -72,8 +72,8 @@ def main():
         result = make_specs(read(args.graph), read(args.config), args.output)
         print(json.dumps(result["metadata"], indent=2))
     elif args.command == "generate-qa":
-        from .pipeline import generate_questions
-        result = generate_questions(read(args.specs), read(args.config), args.output, args.max_calls)
+        from .audited_questions import generate_audited_questions
+        result = generate_audited_questions(read(args.specs), read(args.config), args.output, args.max_calls)
         print(json.dumps(result["metadata"], indent=2))
     elif args.command == "evaluate":
         from .pipeline import evaluate
