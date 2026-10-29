@@ -1,4 +1,6 @@
 .venv/
+.venv-vllm/
+vllm-environment.txt
 .deps/
 __pycache__/
 *.egg-info/

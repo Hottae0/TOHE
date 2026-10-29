@@ -26,7 +26,7 @@ These checks validate execution and data handling. They are not final scientific
 
 - Full 300-epoch × 3-seed study.
 - Actual LLM-generated English questions, semantic wording audit, or LLM QA scores.
-- GPT-4o mini endpoint and Qwen/vLLM live integration (no key/server configured locally).
+- Qwen/vLLM live integration (no server configured locally).
 - Linux/Docker execution on the user's server; a CI workflow is supplied but its success must be checked separately.
 - Original paper's numerical ranking/MAP reproduction; only its **data preprocessing** was verified exactly. Our optimizer/sampling/evaluator details are documented separately.
 - Loss-component ablations, Euclidean TOHE counterparts, shuffled codes, alternate serializers, held-out link prediction, external QA datasets.
@@ -39,3 +39,7 @@ python scripts/validate_wordnet.py runs/evidence-local/data/graph.json runs/loca
 ```
 
 The latter writes a separate short-run config, embeddings, metrics, task specs and prompt-only records. It does not call a language model. Do not insert its numerical scores into a main experiment table.
+
+## Qwen-only configuration revision
+
+Question generation and evaluation both use Qwen2.5-7B-Instruct through the same local endpoint. Full/small CPU and CUDA profiles are provided. GPT profiles were removed. Existing generated-question caches must not be resumed with a changed generator; use a fresh ROOT. Same-model generation/evaluation bias remains. GPU training and live vLLM were not executed locally.

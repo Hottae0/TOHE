@@ -59,9 +59,9 @@
     "timeout_seconds": 120
   },
   "generation_llm": {
-    "model": "gpt-4o-mini-2024-07-18",
-    "endpoint_env": "TOHE_GENERATOR_ENDPOINT",
-    "api_key_env": "OPENAI_API_KEY",
+    "model": "Qwen/Qwen2.5-7B-Instruct",
+    "endpoint_env": "TOHE_QWEN_ENDPOINT",
+    "api_key_env": "TOHE_QWEN_KEY",
     "temperature": 0.2,
     "max_output_tokens": 512,
     "timeout_seconds": 120

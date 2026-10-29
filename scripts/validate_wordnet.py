@@ -9,7 +9,7 @@ from tohe.pipeline import evaluate
 
 graph = read(sys.argv[1])
 root = Path(sys.argv[2])
-cfg = read("configs/small-gpt4o-mini.json")
+cfg = read("configs/small-qwen2.5-7b.json")
 cfg["protocol"] = "real-wordnet-two-epoch-validation-NOT-final-results"
 cfg["training"].update(epochs=2, batch_size=128, negatives=10, seeds=[11], burnin_epochs=1)
 write(root / "config.json", cfg)

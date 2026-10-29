@@ -1,5 +1,5 @@
 {
-  "protocol": "wordnet-evidence-local-to-frozen-qa-v2",
+  "protocol": "wordnet-evidence-local-to-frozen-qa-v2-small-diagnostic",
   "embedding_scope": "evidence_subgraph_only",
   "seed": 42,
   "conditions": [
@@ -19,11 +19,9 @@
     "learning_rate": 0.3,
     "burnin_epochs": 20,
     "seeds": [
-      11,
-      22,
-      33
+      11
     ],
-    "device": "cpu",
+    "device": "cuda",
     "dtype": "float64",
     "temperature": 0.25,
     "radial_margin": 0.1,
@@ -43,28 +41,27 @@
     "prototype_seed": 2026
   },
   "qa": {
-    "dev_graphs": 50,
-    "test_graphs": 250,
+    "dev_graphs": 5,
+    "test_graphs": 15,
     "nodes_per_graph": [
       20,
-      40,
-      80
+      40
     ],
     "questions_per_graph": 6,
     "generation_temperature": 0.2
   },
   "llm": {
-    "model": "gpt-4o-mini-2024-07-18",
-    "endpoint_env": "TOHE_CHAT_ENDPOINT",
-    "api_key_env": "OPENAI_API_KEY",
+    "model": "Qwen/Qwen2.5-7B-Instruct",
+    "endpoint_env": "TOHE_QWEN_ENDPOINT",
+    "api_key_env": "TOHE_QWEN_KEY",
     "temperature": 0.0,
     "max_output_tokens": 256,
     "timeout_seconds": 120
   },
   "generation_llm": {
-    "model": "gpt-4o-mini-2024-07-18",
-    "endpoint_env": "TOHE_GENERATOR_ENDPOINT",
-    "api_key_env": "OPENAI_API_KEY",
+    "model": "Qwen/Qwen2.5-7B-Instruct",
+    "endpoint_env": "TOHE_QWEN_ENDPOINT",
+    "api_key_env": "TOHE_QWEN_KEY",
     "temperature": 0.2,
     "max_output_tokens": 512,
     "timeout_seconds": 120

@@ -3,11 +3,10 @@ from copy import deepcopy
 from tohe.io import read, write
 
 base = read("configs/pilot.json")
-base["generation_llm"].update(model="gpt-4o-mini-2024-07-18", api_key_env="OPENAI_API_KEY")
-base["llm"].update(model="gpt-4o-mini-2024-07-18", api_key_env="OPENAI_API_KEY")
-profiles = {"gpt4o-mini": deepcopy(base)}
-base["llm"].update(model="Qwen/Qwen2.5-7B-Instruct", api_key_env="TOHE_QWEN_KEY", endpoint_env="TOHE_QWEN_ENDPOINT")
-profiles["qwen2.5-7b"] = deepcopy(base)
+for field in ("llm", "generation_llm"):
+    base[field].update(model="Qwen/Qwen2.5-7B-Instruct", api_key_env="TOHE_QWEN_KEY",
+                       endpoint_env="TOHE_QWEN_ENDPOINT")
+profiles = {"qwen2.5-7b": deepcopy(base)}
 for name, profile in profiles.items():
     write(f"configs/{name}.json", profile)
     small = deepcopy(profile)
@@ -16,4 +15,8 @@ for name, profile in profiles.items():
     small["training"].update(seeds=[11])
     small["qa"].update(dev_graphs=5, test_graphs=15, nodes_per_graph=[20, 40])
     write(f"configs/small-{name}.json", small)
+    for prefix, config in (("", profile), ("small-", small)):
+        cuda = deepcopy(config)
+        cuda["training"]["device"] = "cuda"
+        write(f"configs/{prefix}{name}-cuda.json", cuda)
     print(f"Wrote full and small configs for {name}")

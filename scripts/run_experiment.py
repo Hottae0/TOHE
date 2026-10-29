@@ -8,7 +8,7 @@ from tohe.io import read, write
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--stage", required=True, choices=["prepare", "train", "specs", "generate", "evaluate", "report"])
-parser.add_argument("--config", default="configs/gpt4o-mini.json")
+parser.add_argument("--config", default="configs/qwen2.5-7b-cuda.json")
 parser.add_argument("--root", default="runs/evidence-local")
 parser.add_argument("--split", choices=["dev", "test"], default="dev")
 parser.add_argument("--max-calls", type=int, default=0, help="Required positive limit for LLM stages; excludes transient HTTP retries")
