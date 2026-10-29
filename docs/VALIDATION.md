@@ -7,8 +7,8 @@ These checks validate execution and data handling. They are not final scientific
 - 12 protocol tests passed locally. Added checks for excluding paths through invisible nodes, rejecting conflicting context IDs, reusing the same evidence embeddings across questions regardless of gold, masking no-negative sources, and rejecting global/wrong-evidence checkpoints before any API call.
 - Real WordNet small profile: 20 evidence subgraphs (20 or 40 nodes each), 120 unique semantic questions, 30 dev / 90 test, 84 shared original nodes across the splits.
 - Ran 80 independent local fits (20 contexts × 4 methods × 1 seed), each for two validation epochs. Every checkpoint contains only the corresponding evidence nodes.
-- Completed 630 prompt-only test evaluations, with zero LLM calls. This is a pipeline check, not a 30-epoch small-study performance result.
-- Server entry point now defaults to `runs/evidence-local`; use `runs/small-local` for the small profile. Old global checkpoints and predictions are incompatible.
+- Completed 630 prompt-only test evaluations, with zero LLM calls. This is a pipeline check, not a full small-study performance result. The small config now uses 300 epochs / 20 burn-in; that longer study has not been executed.
+- Server entry point now defaults to `runs/evidence-local`; use a fresh `runs/small-local-300ep` for the small profile. Old global checkpoints and earlier 30-epoch small checkpoints are incompatible.
 
 ## Earlier global-protocol validation (historical, not current QA training)
 

@@ -13,11 +13,11 @@
   ],
   "training": {
     "dimension": 5,
-    "epochs": 30,
+    "epochs": 300,
     "batch_size": 10,
     "negatives": 50,
     "learning_rate": 0.3,
-    "burnin_epochs": 3,
+    "burnin_epochs": 20,
     "seeds": [
       11
     ],

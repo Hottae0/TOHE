@@ -48,7 +48,7 @@ python -m unittest discover -s tests -v
 
 | 항목 | 전체 설정 | Small 설정 |
 |---|---|---|
-| epochs / burn-in | 300 / 20 | 30 / 3 |
+| epochs / burn-in | 300 / 20 | 300 / 20 |
 | 학습 seeds | 3개 | 1개 |
 | evidence 수 / checkpoint 수 | 300 / 3,600 | 20 / 80 |
 | QA | 1,800개 | 120개 (유형별 40개) |
@@ -56,13 +56,13 @@ python -m unittest discover -s tests -v
 | 문맥당 노드 | 20·40·80 | 20·40 |
 | LLM 하나의 테스트 요청 | 22,500회 | 630회 |
 
-WordNet 원본, 손실 정의·가중치, 차원, batch size, negative 수, 코드 변환과 영어 프롬프트는 동일합니다. 같은 evidence 하나 기준 학습 epoch×seed 작업량은 1/30이며 실제 시간은 서버에 따라 다릅니다. 낮은 정확도가 나오더라도 짧은 학습·작은 표본의 영향과 방법 자체의 한계를 구분해야 합니다. 논문용 최종 결과로 사용하지 마세요.
+Small은 학습 길이를 줄이지 않고 QA 수·evidence 수·seed 수를 줄입니다. epochs와 burn-in을 포함한 학습 설정은 seed 수를 제외하면 전체 설정과 같습니다. 같은 evidence 하나 기준 학습 epoch×seed 작업량은 1/3이며 실제 시간은 서버에 따라 다릅니다. 300 epochs가 수렴이나 QA 향상을 보장하지는 않으므로 개발 결과를 확인하세요. 작은 평가 표본·단일 seed 결과를 논문용 최종 결과로 사용하지 마세요.
 
 설치와 아래 LLM 환경변수 설정 후, **전체 실험과 다른 저장 경로**로 실행합니다:
 
 ```bash
 CONFIG=configs/small-gpt4o-mini.json
-ROOT=runs/small-local
+ROOT=runs/small-local-300ep
 python scripts/run_experiment.py --stage prepare --config "$CONFIG" --root "$ROOT"
 python scripts/run_experiment.py --stage specs --config "$CONFIG" --root "$ROOT"
 python scripts/run_experiment.py --stage train --config "$CONFIG" --root "$ROOT"
@@ -74,6 +74,8 @@ python scripts/run_experiment.py --stage report --config "$CONFIG" --root "$ROOT
 ```
 
 Qwen을 추가로 비교할 때는 `CONFIG=configs/small-qwen2.5-7b.json`으로 바꾸고 **같은 ROOT에서 evaluate/report만** 실행합니다. 질문 생성·학습을 반복하지 않습니다. 처음 GPT 모델 하나만 돌려도 됩니다. Small도 의미 기준 QA 중복 제거를 동일하게 적용합니다. 이미 전체 실험을 실행 중이라면 해당 실행을 자동으로 변경하거나 중단하지 않습니다.
+
+기존 30-epoch small checkpoint는 새 설정과 호환되지 않습니다. `runs/small-local-300ep`처럼 새 경로를 사용해 처음부터 학습하세요. 기존 실행을 자동으로 이어서 300 epochs로 늘리지는 않습니다.
 
 ## 1. 데이터 준비
 

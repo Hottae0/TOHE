@@ -12,7 +12,8 @@ for name, profile in profiles.items():
     write(f"configs/{name}.json", profile)
     small = deepcopy(profile)
     small["protocol"] += "-small-diagnostic"
-    small["training"].update(epochs=30, burnin_epochs=3, seeds=[11])
+    # Reduce evaluation breadth and repetitions, not the optimization horizon.
+    small["training"].update(seeds=[11])
     small["qa"].update(dev_graphs=5, test_graphs=15, nodes_per_graph=[20, 40])
     write(f"configs/small-{name}.json", small)
     print(f"Wrote full and small configs for {name}")
