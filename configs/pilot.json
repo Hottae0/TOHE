@@ -1,0 +1,24 @@
+{
+  "protocol": "wordnet-mammals-reconstruction-to-frozen-qa-v1",
+  "seed": 42,
+  "conditions": ["direct_id", "direct_bfs", "direct_dfs", "euclidean", "poincare", "v1", "v2"],
+  "training": {
+    "dimension": 5,
+    "epochs": 300,
+    "batch_size": 10,
+    "negatives": 50,
+    "learning_rate": 0.3,
+    "burnin_epochs": 20,
+    "seeds": [11, 22, 33],
+    "device": "cpu",
+    "dtype": "float64",
+    "temperature": 0.25,
+    "radial_margin": 0.1,
+    "code_margin": 0.2,
+    "weights": {"radial": 0.1, "sector": 0.1, "collision": 0.1, "structure": 0.1, "hard": 0.01}
+  },
+  "serializer": {"radial_bins": 8, "directions": 8, "max_radius": 6.0, "prototype_seed": 2026},
+  "qa": {"dev_graphs": 50, "test_graphs": 250, "nodes_per_graph": [20, 40, 80], "questions_per_graph": 6, "generation_temperature": 0.2},
+  "llm": {"model": null, "endpoint_env": "TOHE_CHAT_ENDPOINT", "api_key_env": "TOHE_API_KEY", "temperature": 0.0, "max_output_tokens": 256, "timeout_seconds": 120},
+  "generation_llm": {"model": null, "endpoint_env": "TOHE_GENERATOR_ENDPOINT", "api_key_env": "TOHE_GENERATOR_KEY", "temperature": 0.2, "max_output_tokens": 512, "timeout_seconds": 120}
+}
