@@ -12,6 +12,12 @@ The previous wording-only generator accepted “How many nodes ...?” for a nod
 
 The reviewer is a **separate call to the same model**, not an independent model or proof of semantic correctness. Human sample review remains necessary. The question is never selected based on whether the QA evaluator answers it correctly. Gold and embeddings are unchanged. A canonical-template diagnostic remains available with --question-mode canonical and is honestly labeled as deterministic, not LLM-generated.
 
+### Structured reviewer response repair
+
+The reviewer sometimes returned a prose string in interpreted_spec instead of an object. Reviewer calls now send a generic response_format=json_schema using [vLLM structured outputs](https://docs.vllm.ai/en/latest/features/structured_outputs/). The schema permits all three tasks, count answers, reversed/unspecified direction, shortest-distance semantics, ambiguity and unknown tasks. It does not contain the expected task, IDs, k or gold and cannot force a passing verdict. A local shape validator distinguishes reviewer-format errors from actual semantic mismatches. Format failures preserve the candidate and retry its review with feedback; semantic failures regenerate the question. These requests still share the bounded request budget.
+
+Existing audited-v3 caches and accepted questions can resume; new successful reviews record review_protocol=structured-v1. The generic review shape changed without changing the writer or graph semantics. No checkpoint regeneration or file deletion is needed. If the server rejects response_format with HTTP 400, inspect vLLM version/support rather than silently disabling validation. Only review calls use constrained output; QA evaluator decoding remains the same across all conditions.
+
 ## Existing server run
 
 Keep the same ROOT and config so the evidence and checkpoints are reused. Do not run prepare, specs or train again. The Qwen server can remain running.

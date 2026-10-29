@@ -26,6 +26,8 @@ def chat(config, messages):
     key = os.environ.get(config["api_key_env"], "")
     body = {"model": config["model"], "messages": messages,
             "temperature": config["temperature"], "max_tokens": config["max_output_tokens"]}
+    if config.get("response_format") is not None:
+        body["response_format"] = config["response_format"]
     headers = {"Content-Type": "application/json"}
     if key:
         headers["Authorization"] = "Bearer " + key
@@ -38,6 +40,7 @@ def chat(config, messages):
             return {"text": payload["choices"][0]["message"]["content"],
                     "usage": payload.get("usage"), "response_model": payload.get("model"),
                     "system_fingerprint": payload.get("system_fingerprint"),
+                    "finish_reason": payload["choices"][0].get("finish_reason"),
                     "seconds": time.perf_counter() - start,
                     "request_hash": digest(body), "endpoint_hash": digest(endpoint)}
         except urllib.error.HTTPError as exc:
