@@ -30,7 +30,7 @@ WordNet graph → text → frozen LLM 실험 코드입니다. 기본 7개 비교
 Linux 서버의 Python 3.10 이상을 사용합니다. 작은 mammals 임베딩 학습은 CPU로 실행할 수 있습니다. Qwen 추론은 별도의 GPU 서버 또는 호스팅 endpoint를 권장합니다.
 
 ```bash
-git clone https://github.com/Hottae0/TOHE.git
+git clone --branch codex/wordnet-pilot https://github.com/Hottae0/TOHE.git
 cd TOHE
 python -m venv .venv
 source .venv/bin/activate
