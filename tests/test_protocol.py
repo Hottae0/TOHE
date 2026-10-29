@@ -1,4 +1,5 @@
 import json
+import copy
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,7 @@ from tohe.report import report
 from tohe.serialize import serialize
 from tohe.data import synthetic
 from tohe.qa import make_specs, semantic_key
+from tohe.evidence import local_graph, evidence_graphs, train_evidence, check_checkpoint, SCOPE
 
 
 class ProtocolTests(unittest.TestCase):
@@ -91,14 +93,23 @@ class ProtocolTests(unittest.TestCase):
         self.assertFalse(score_prediction(["a", "unknown"], ["a"])["correct"])
 
     def test_four_trainers_and_seven_condition_dry_run(self):
-        for variant in ["euclidean", "poincare", "v1", "v2"]:
-            output = self.root / "checkpoints" / f"{variant}-11.pt"
-            ckpt = train(self.graph, self.config, variant, 11, output)
-            self.assertTrue(torch.isfinite(ckpt["embeddings"]).all())
-            if variant != "euclidean":
-                self.assertLess(ckpt["embeddings"].norm(dim=1).max().item(), 1)
-            self.assertGreaterEqual(embedding_metrics(self.graph, ckpt)["map"], 0)
         data = make_specs(self.graph, self.config, self.root / "qa.json")
+        results = train_evidence(data, self.config, self.root / "checkpoints")
+        self.assertEqual(len(results), 8)  # two contexts, not twelve questions
+        for output in (self.root / "checkpoints").glob("*/*.pt"):
+            ckpt = torch.load(output, weights_only=True)
+            self.assertTrue(torch.isfinite(ckpt["embeddings"]).all())
+            self.assertEqual(ckpt["embedding_scope"], SCOPE)
+            self.assertEqual(len(ckpt["nodes"]), 8)
+            if ckpt["variant"] != "euclidean":
+                self.assertLess(ckpt["embeddings"].norm(dim=1).max().item(), 1)
+        changed = copy.deepcopy(data)
+        for q in changed["questions"]:
+            q["gold"] = "not accessed by training"
+            q["question"] = "not accessed by training"
+        changed["graph_hash"] = "different global source"
+        with patch("tohe.model.train", side_effect=AssertionError("Should reuse local embeddings")):
+            train_evidence(changed, self.config, self.root / "checkpoints")
         result = evaluate(data, self.config, self.root / "eval", self.root / "checkpoints", "test", 1000, True)
         self.assertEqual(result["new_records"], 42)
         self.assertEqual(len(rows(self.root / "eval/prompts.jsonl")), 42)
@@ -106,6 +117,53 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(again["new_records"], 0)
         with self.assertRaises(ValueError):
             evaluate(data, self.config, self.root / "real", self.root / "checkpoints", "test", 1, False)
+        test_context = next(q["context_id"] for q in data["questions"] if q["split"] == "test")
+        path = self.root / "checkpoints" / test_context / "v2-11.pt"
+        bad = torch.load(path, weights_only=True)
+        bad["embedding_scope"] = "global_mammals_reconstruction"
+        torch.save(bad, path)
+        with patch("tohe.pipeline.chat") as api:
+            with self.assertRaisesRegex(ValueError, "Global/legacy"):
+                evaluate(data, self.config, self.root / "bad", self.root / "checkpoints", "test", 1)
+            api.assert_not_called()
+
+    def test_local_closure_never_imports_outside_paths(self):
+        context = {"nodes": ["A", "B", "C"], "original_ids": {v: v for v in "ABC"},
+                   "edges": [["A", "C"]], "closure": [["A", "B"]], "evidence_hash": "stale"}
+        # Full graph may contain A -> X -> B, but X is not visible.
+        global_pairs = closure(["A", "B", "C", "X"], [("A", "X"), ("X", "B"), ("A", "C")])
+        self.assertIn(("A", "B"), global_pairs)
+        local = local_graph(context)
+        self.assertEqual(local["closure"], [("A", "C")])
+        altered = dict(context, closure=global_pairs, evidence_hash="another stale hash")
+        self.assertEqual(local, local_graph(altered))
+        altered = copy.deepcopy(context)
+        altered["edges"].append(["C", "B"])
+        self.assertNotEqual(local["graph_hash"], local_graph(altered)["graph_hash"])
+
+    def test_conflicting_evidence_ids_fail(self):
+        data = make_specs(self.graph, self.config, self.root / "qa.json")
+        data["questions"][1]["graph"] = copy.deepcopy(data["questions"][1]["graph"])
+        data["questions"][1]["graph"]["edges"].pop()
+        with self.assertRaisesRegex(ValueError, "One context ID"):
+            evidence_graphs(data)
+
+    def test_no_external_negatives_and_checkpoint_scope_guard(self):
+        graph = local_graph({"nodes": ["A", "B"], "edges": [["A", "B"]],
+                             "original_ids": {"A": "A", "B": "B"}})
+        for variant in ("euclidean", "poincare", "v1", "v2"):
+            ckpt = train(graph, self.config, variant, 11, self.root / f"{variant}.pt")
+            self.assertEqual(ckpt["nodes"], ["A", "B"])
+            self.assertEqual(ckpt["sampling"]["no_negative_pairs"], 1)
+            self.assertTrue(torch.isfinite(ckpt["embeddings"]).all())
+            check_checkpoint(ckpt, graph, self.config, variant, 11)
+        bad = dict(ckpt, embedding_scope="global_mammals_reconstruction")
+        with self.assertRaisesRegex(ValueError, "Global/legacy"):
+            check_checkpoint(bad, graph, self.config, "v2", 11)
+        wrong = local_graph({"nodes": ["A", "B"], "edges": [["B", "A"]],
+                             "original_ids": {"A": "A", "B": "B"}})
+        with self.assertRaisesRegex(ValueError, "exact visible evidence"):
+            check_checkpoint(ckpt, wrong, self.config, "v2", 11)
 
     def test_epoch_checkpoint_resume_is_exact_on_cpu(self):
         path = self.root / "resume.pt"

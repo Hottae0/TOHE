@@ -1,5 +1,6 @@
 {
-  "protocol": "wordnet-mammals-reconstruction-to-frozen-qa-v1",
+  "protocol": "wordnet-evidence-local-to-frozen-qa-v2",
+  "embedding_scope": "evidence_subgraph_only",
   "seed": 42,
   "conditions": ["direct_id", "direct_bfs", "direct_dfs", "euclidean", "poincare", "v1", "v2"],
   "training": {

@@ -101,6 +101,10 @@ def train(graph, config, variant, seed, output):
     hyperbolic = variant != "euclidean"
     nodes = sorted(graph["nodes"])
     index = {node: i for i, node in enumerate(nodes)}
+    if not graph["closure"]:
+        raise ValueError("Cannot train a graph without any observed relation")
+    if cfg["negatives"] < 1:
+        raise ValueError("negatives must be positive")
     pairs = torch.tensor([(index[u], index[v]) for u, v in graph["closure"]], device=device)
     n = len(nodes)
     if n > 10000:
@@ -110,8 +114,8 @@ def train(graph, config, variant, seed, output):
     comparable = positive | positive.T | torch.eye(n, dtype=torch.bool, device=device)
     allowed = ~(positive | torch.eye(n, dtype=torch.bool, device=device))
     candidates = [torch.where(allowed[i])[0] for i in range(n)]
-    if any(len(candidates[int(u)]) == 0 for u in pairs[:, 0]):
-        raise ValueError("A training source has no valid negatives")
+    has_negatives = torch.tensor([len(c) > 0 for c in candidates], device=device)
+    no_negative_pairs = int((~has_negatives[pairs[:, 0]]).sum())
     z = torch.nn.Parameter(torch.empty(n, cfg["dimension"], dtype=dtype, device=device).uniform_(-0.001, 0.001))
     geometry = FixedSerializerGeometry(config["serializer"], cfg["dimension"], dtype, device, hyperbolic)
     partial = output.with_suffix(".partial.pt")
@@ -132,11 +136,16 @@ def train(graph, config, variant, seed, output):
         rate = cfg["learning_rate"] / (10 if epoch < cfg["burnin_epochs"] else 1)
         for batch in pairs[torch.randperm(len(pairs), device=device)].split(cfg["batch_size"]):
             neg = torch.stack([candidates[int(u)][torch.randint(len(candidates[int(u)]), (cfg["negatives"],), device=device)]
+                               if len(candidates[int(u)]) else u.expand(cfg["negatives"])
                                for u in batch[:, 0]])
             source, target = z[batch[:, 0]], z[batch[:, 1]]
+            valid = has_negatives[batch[:, 0]]
+            negative_scores = -distance(source[:, None], z[neg], hyperbolic)
+            negative_scores = negative_scores.masked_fill(~valid[:, None], -torch.inf)
             scores = torch.cat([-distance(source, target, hyperbolic)[:, None],
-                                -distance(source[:, None], z[neg], hyperbolic)], dim=1)
-            base = -torch.log_softmax(scores, 1)[:, 0].mean()
+                                negative_scores], dim=1)
+            per_pair = -torch.log_softmax(scores, 1)[:, 0]
+            base = (per_pair * valid).sum() / valid.sum().clamp_min(1)
             extra = auxiliary(z, batch, neg, comparable, geometry, cfg, variant)
             loss = base + sum(cfg["weights"][k] * value for k, value in extra.items())
             if not torch.isfinite(loss):
@@ -168,6 +177,9 @@ def train(graph, config, variant, seed, output):
         if epoch == 0 or (epoch + 1) % 25 == 0:
             print(f"{variant} seed={seed} epoch={epoch+1} loss={history[-1]['total']:.5f}", flush=True)
     payload = {"variant": variant, "seed": seed, "nodes": nodes, "embeddings": z.detach().cpu(),
+               "embedding_scope": graph.get("metadata", {}).get("scope", "unspecified"),
+               "sampling": {"no_negative_pairs": no_negative_pairs,
+                            "policy": "omit_ineligible_pairs_from_graph_loss_keep_auxiliary_no_external_negatives"},
                "codes": geometry.hard(z).detach().cpu(), "config": config,
                "graph_hash": graph["graph_hash"], "config_hash": digest(config),
                "seconds": prior_seconds + time.perf_counter() - start, "history": history,
@@ -223,4 +235,6 @@ def embedding_metrics(graph, checkpoint):
             "hard_code_triplet_accuracy": correct / comparisons if comparisons else None,
             "incomparable_collision_rate": collisions / comparisons if comparisons else None,
             "triplets": comparisons, "training_seconds": checkpoint["seconds"],
+            "no_negative_pairs": checkpoint.get("sampling", {}).get("no_negative_pairs"),
+            "embedding_scope": checkpoint.get("embedding_scope"),
             "evaluation_note": "Self excluded; filtered rank uses midranks; MAP uses all other nodes with ID tie-breaks. Not an exact upstream evaluator reproduction."}

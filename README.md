@@ -17,7 +17,8 @@ WordNet graph → text → frozen LLM 실험 코드입니다. 기본 7개 비교
 | v2 | 같은 직접 관계 + v2에서 유도된 코드 | graph + radial + code-structure + hard |
 
 - WordNet mammals, 상하위 방향은 **child → parent**.
-- 학습은 추이적 폐쇄, LLM facts는 직접 간선입니다. 다중 부모를 보존합니다.
+- **evidence subgraph별로 독립 학습**합니다. 학습은 해당 subgraph 내부의 추이적 폐쇄, LLM facts는 그 subgraph의 직접 간선입니다. 다중 부모를 보존합니다.
+- 질문 명세와 evidence를 먼저 고정합니다. 같은 evidence의 여섯 질문은 checkpoint를 재사용합니다. 전체 WordNet 좌표로 초기화하거나 외부 negative를 가져오지 않습니다.
 - LLM·코드북은 학습하지 않습니다. 노드 좌표를 학습합니다.
 - 기본 설정은 5차원, 300 epochs, seed 11/22/33. 학습형 코드북/VQ/RQ 없음.
 - QA 목표: 1,800개, 세 유형 각각 600개. 개발 300개 / 테스트 1,500개.
@@ -49,18 +50,19 @@ python -m unittest discover -s tests -v
 |---|---|---|
 | epochs / burn-in | 300 / 20 | 30 / 3 |
 | 학습 seeds | 3개 | 1개 |
+| evidence 수 / checkpoint 수 | 300 / 3,600 | 20 / 80 |
 | QA | 1,800개 | 120개 (유형별 40개) |
 | 개발 / 테스트 QA | 300 / 1,500 | 30 / 90 |
 | 문맥당 노드 | 20·40·80 | 20·40 |
 | LLM 하나의 테스트 요청 | 22,500회 | 630회 |
 
-학습 원본 그래프, 손실 정의·가중치, 차원, batch size, negative 수, 코드 변환과 영어 프롬프트는 동일합니다. 학습 epoch×seed 작업량은 1/30이며 실제 시간은 서버에 따라 다릅니다. 낮은 정확도가 나오더라도 짧은 학습·작은 표본의 영향과 방법 자체의 한계를 구분해야 합니다. 논문용 최종 결과로 사용하지 마세요.
+WordNet 원본, 손실 정의·가중치, 차원, batch size, negative 수, 코드 변환과 영어 프롬프트는 동일합니다. 같은 evidence 하나 기준 학습 epoch×seed 작업량은 1/30이며 실제 시간은 서버에 따라 다릅니다. 낮은 정확도가 나오더라도 짧은 학습·작은 표본의 영향과 방법 자체의 한계를 구분해야 합니다. 논문용 최종 결과로 사용하지 마세요.
 
 설치와 아래 LLM 환경변수 설정 후, **전체 실험과 다른 저장 경로**로 실행합니다:
 
 ```bash
 CONFIG=configs/small-gpt4o-mini.json
-ROOT=runs/small
+ROOT=runs/small-local
 python scripts/run_experiment.py --stage prepare --config "$CONFIG" --root "$ROOT"
 python scripts/run_experiment.py --stage specs --config "$CONFIG" --root "$ROOT"
 python scripts/run_experiment.py --stage train --config "$CONFIG" --root "$ROOT"
@@ -82,7 +84,7 @@ python scripts/run_experiment.py --stage specs --config configs/gpt4o-mini.json
 
 첫 명령은 NLTK WordNet과 고정된 upstream commit의 mammals 필터를 내려받습니다. 두 번째는 중복 없는 질문 명세·알고리즘 정답을 만듭니다. **이 단계에서는 아직 LLM이 작성한 질문이 없습니다.**
 
-결과는 `runs/main/data/`에 저장됩니다. 준비된 데이터나 질문 세트를 실수로 덮어쓰지 않습니다. 새 실험은 `--root runs/new-study`처럼 별도 경로를 지정합니다. 모든 단계에서 같은 `--root`를 사용하세요.
+결과는 `runs/evidence-local/data/`에 저장됩니다. 준비된 데이터나 질문 세트를 실수로 덮어쓰지 않습니다. 새 실험은 `--root runs/new-study`처럼 별도 경로를 지정합니다. 모든 단계에서 같은 `--root`를 사용하세요. 기존 전체 그래프 checkpoint/평가 결과와는 호환되지 않으므로 새 경로에서 시작하세요.
 
 ## 2. 네 임베딩 조건 학습
 
@@ -90,7 +92,7 @@ python scripts/run_experiment.py --stage specs --config configs/gpt4o-mini.json
 python scripts/run_experiment.py --stage train --config configs/gpt4o-mini.json
 ```
 
-4조건 × 3 seeds를 학습하고 각 checkpoint의 reconstruction/code 지표를 저장합니다. 각 epoch마다 partial checkpoint와 난수 상태를 보존합니다. 중단되면 같은 명령으로 다시 실행합니다. 완료된 checkpoint는 검증 후 재사용합니다. 학습 설정을 바꾸면 새 `--root`를 사용하세요.
+`specs`를 먼저 실행해야 합니다. 각 evidence마다 4조건 × seeds를 독립 학습하고 reconstruction/code 지표를 저장합니다. Small은 20 × 4 × 1 = 80개 checkpoint입니다. 각 epoch마다 partial checkpoint와 난수 상태를 보존합니다. 중단되면 같은 명령으로 다시 실행합니다. 완료된 checkpoint는 정확한 evidence hash·노드 집합·설정을 검증한 뒤 재사용합니다.
 
 기본 하이퍼파라미터는 시작 설정입니다. 추가 손실 가중치가 개발셋에서 최적화되었다고 주장하지 않습니다. 개발 평가로 설정을 고정한 다음 테스트를 실행하세요.
 
@@ -154,7 +156,8 @@ Qwen용 질문을 다시 생성하거나 임베딩을 다시 학습하지 않습
 
 ## 결과와 점검
 
-- `checkpoints/*.metrics.json`: reconstruction, hard-code 지표, 학습 시간.
+- `checkpoints/<context_id>/*.metrics.json`: 해당 evidence의 reconstruction, hard-code 지표, 학습 시간.
+- `checkpoints/<context_id>/evidence.json`: 실제 학습에 사용한 노드·직접 간선·로컬 추이 관계.
 - `evaluation/<model>/<split>/predictions.jsonl`: prompt, 응답, 정답, exact match, set F1, 실제 API 토큰 사용량.
 - `summary.csv`: 조건·seed 및 질문 유형/크기/정답 크기/k/경로 길이별 성능.
 - `paired_comparisons.json`: Direct ID 대비 paired 차이와 그래프 단위 bootstrap 구간. 불완전한 실행에는 구간을 산출하지 않습니다.
