@@ -51,3 +51,7 @@ Question generation and evaluation both use Qwen2.5-7B-Instruct through the same
 ## Audited wording and task-specific prompt revision
 
 18 local protocol tests pass, including count-versus-set rejection despite exact spec echo, blind semantic reconstruction rejecting shortest-distance interpretation, candidate persistence across request budgets, fail-closed review, canonical provenance, checkpoint reuse, and unknown-node ID classification. Main server and CLI now use audited-v3 questions; the legacy echo-only function remains for historical tests. New prompt-v2/audited-v3 outputs do not overwrite previous experiments. No live GPU/Qwen validation of this revision was run locally. See QA_REPAIR.md for migration and same-model reviewer limitations.
+
+## Structured reviewer response repair
+
+20 local tests pass. Added a regression for interpreted_spec returned as prose: it is classified as a format error, the same question is reviewed again, and a valid structured interpretation is required. A mocked HTTP transport test confirms response_format=json_schema is actually sent, and finish_reason is preserved. Review schema is generic and does not encode expected task IDs or force acceptance. Live vLLM structured decoding remains to be checked on the user's server.

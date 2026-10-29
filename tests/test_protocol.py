@@ -15,7 +15,8 @@ from tohe.data import synthetic
 from tohe.qa import make_specs, semantic_key
 from tohe.evidence import local_graph, evidence_graphs, train_evidence, check_checkpoint, SCOPE
 from tohe.questions import canonical_question, canonical_questions
-from tohe.audited_questions import generate_audited_questions, review_messages
+from tohe.audited_questions import generate_audited_questions, review_messages, review_response_format
+from tohe.llm import chat
 
 
 class ProtocolTests(unittest.TestCase):
@@ -177,6 +178,44 @@ class ProtocolTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "failed 3 attempts"):
                 generate_audited_questions(data, self.config, self.root / "bad-audit.json", 20)
             self.assertEqual(mock.call_count, 3)
+
+    def test_reviewer_format_failure_reuses_question_and_forces_shape(self):
+        data = make_specs(self.graph, self.config, self.root / "specs.json")
+        data["questions"] = data["questions"][:1]
+        spec = data["questions"][0]["spec"]
+        valid = dict(interpreted_spec=spec, answer_kind="boolean", edge_direction="outgoing",
+                     path_semantics="nonempty_path", ambiguous=False)
+        responses = [
+            {"text": json.dumps(dict(question=canonical_question(spec), spec=spec))},
+            {"text": json.dumps(dict(valid, interpreted_spec="Find nodes that are reachable"))},
+            {"text": json.dumps(valid)}]
+        output = self.root / "structured-audit.json"
+        with patch("tohe.audited_questions.chat", side_effect=responses) as mock:
+            result = generate_audited_questions(data, self.config, output, 3)
+        self.assertEqual(mock.call_count, 3)  # One writer, two reviewers.
+        for call in mock.call_args_list[1:]:
+            request_cfg, messages = call.args
+            self.assertEqual(request_cfg["response_format"]["type"], "json_schema")
+            payload = json.loads(messages[0]["content"])
+            self.assertEqual(set(payload), {"review_instruction", "question"})
+        self.assertIn("previous review format error", json.loads(mock.call_args.args[1][0]["content"])["review_instruction"])
+        self.assertEqual(result["metadata"]["generation_status"], "complete")
+        self.assertEqual(rows(output.with_suffix(".generation-failures.jsonl"))[0]["error_stage"], "review_format")
+        schema_text = json.dumps(review_response_format())
+        self.assertNotIn(spec["source"], schema_text)
+        self.assertIn('"count"', schema_text)  # Allow a negative verdict; don't force acceptance.
+
+    def test_chat_transmits_structured_response_format(self):
+        cfg = dict(self.config["generation_llm"], model="test-model", endpoint_env="TOHE_TEST_ENDPOINT",
+                   response_format=review_response_format())
+        response = {"choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}]}
+        with patch.dict("os.environ", {"TOHE_TEST_ENDPOINT": "http://localhost:8000/v1/chat/completions"}):
+            with patch("tohe.llm.urllib.request.urlopen") as mock:
+                mock.return_value.__enter__.return_value.read.return_value = json.dumps(response).encode()
+                result = chat(cfg, [{"role": "user", "content": "Test"}])
+        body = json.loads(mock.call_args.args[0].data)
+        self.assertEqual(body["response_format"], review_response_format())
+        self.assertEqual(result["finish_reason"], "stop")
 
     def test_generation_resume_and_scoring_strict_types(self):
         data = make_specs(self.graph, self.config, self.root / "qa.json")
