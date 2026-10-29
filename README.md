@@ -109,6 +109,8 @@ python scripts/run_experiment.py --stage report --config "$CONFIG" --root "$ROOT
 
 --max-calls는 해당 실행의 새 논리 요청 수 상한입니다. 재실행하면 완료 항목을 건너뛰며 HTTP 일시 오류 재시도는 별도입니다. 질문·설정·checkpoint가 다른 캐시는 거부합니다. 현재 클라이언트는 순차 처리합니다.
 
+질문 생성에서 JSON 또는 spec 검증에 실패하면 원본 명세를 다시 제시해 문항당 최대 3회 시도합니다. 이 수정 요청도 --max-calls에 포함되므로 일부 문항이 남으면 같은 generate 명령을 재실행하세요. 실패한 전체 응답·원본/반환 명세는 data/qa.generation-failures.jsonl에 저장됩니다. 완료 문항과 임베딩은 재사용합니다. 자동으로 명세를 덮어쓰거나 검증을 생략하지 않습니다. 수정 프롬프트 버전은 새 문항의 generation.prompt_version에 기록되며 기존 문항은 유지됩니다.
+
 ## 결과
 
 - checkpoints/<context_id>/evidence.json: 실제 학습 evidence.

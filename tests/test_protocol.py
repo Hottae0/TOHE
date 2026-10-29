@@ -92,6 +92,45 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(score_prediction(["b", "a"], ["a", "b"])["correct"])
         self.assertFalse(score_prediction(["a", "unknown"], ["a"])["correct"])
 
+    def test_generation_repairs_invalid_spec_without_changing_gold(self):
+        data = make_specs(self.graph, self.config, self.root / "specs.json")
+        item = next(q for q in data["questions"] if q["spec"]["type"] == "common_parents")
+        data["questions"] = [item]
+        wrong = {**item["spec"], "extra": True}
+        responses = [
+            {"text": json.dumps({"question": "Which parents?", "spec": wrong})},
+            {"text": "not JSON"},
+            {"text": json.dumps({"question": "Which direct parents are shared?", "spec": item["spec"]})}]
+        output = self.root / "generated.json"
+        with patch("tohe.pipeline.chat", side_effect=responses) as mock:
+            result = generate_questions(data, self.config, output, 3)
+        self.assertEqual(mock.call_count, 3)
+        correction = mock.call_args.args[1][-1]["content"]
+        self.assertIn(json.dumps(item["spec"]), correction)
+        self.assertEqual(result["questions"][0]["spec"], item["spec"])
+        self.assertEqual(result["questions"][0]["gold"], item["gold"])
+        self.assertEqual(result["questions"][0]["generation"]["attempts"], 3)
+        failures = rows(output.with_suffix(".generation-failures.jsonl"))
+        self.assertEqual(len(failures), 2)
+        self.assertEqual(failures[0]["received_spec"], wrong)
+        self.assertEqual(failures[1]["response"]["text"], "not JSON")
+
+    def test_generation_retry_budget_exhaustion_and_resume(self):
+        data = make_specs(self.graph, self.config, self.root / "specs.json")
+        data["questions"] = data["questions"][:1]
+        output = self.root / "generated.json"
+        with patch("tohe.pipeline.chat", return_value={"text": "{}"}) as mock:
+            partial = generate_questions(data, self.config, output, 1)
+            self.assertEqual(mock.call_count, 1)
+            self.assertEqual(partial["questions"][0]["question_origin"], "awaiting_llm_generation")
+            with self.assertRaisesRegex(ValueError, "failed validation after 3 attempts"):
+                generate_questions(data, self.config, output, 20)
+            self.assertEqual(mock.call_count, 4)
+        spec = data["questions"][0]["spec"]
+        with patch("tohe.pipeline.chat", return_value={"text": json.dumps({"question": "Which nodes?", "spec": spec})}):
+            complete = generate_questions(data, self.config, output, 1)
+        self.assertEqual(complete["metadata"]["generation_status"], "complete")
+
     def test_four_trainers_and_seven_condition_dry_run(self):
         data = make_specs(self.graph, self.config, self.root / "qa.json")
         results = train_evidence(data, self.config, self.root / "checkpoints")

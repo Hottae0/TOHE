@@ -1,4 +1,5 @@
 import copy
+import json
 import os
 from pathlib import Path
 from .io import append, digest, read, rows, write
@@ -29,18 +30,54 @@ def generate_questions(dataset, config, output, max_calls):
         instruction = {
             "instruction": "Write one clear English graph question for this exact task. Do not solve it. Do not change IDs, direction, quantifiers, or k. Return JSON with question and an exact copy of spec.",
             "spec": item["spec"], "definition": item["task_definition"]}
-        response = chat(config["generation_llm"], [{"role": "user", "content": __import__("json").dumps(instruction)}])
-        calls += 1
-        value = parse_json(response["text"])
-        if value.get("spec") != item["spec"] or not isinstance(value.get("question"), str) or not value["question"].strip():
-            raise ValueError(f"Invalid LLM question for {item['id']}; raw output: {response['text'][:200]}")
+        instruction["response_example"] = {"question": "<one English question>", "spec": item["spec"]}
+        messages = [{"role": "user", "content": json.dumps(instruction)}]
+        failure_path = output.with_suffix(".generation-failures.jsonl")
+        for attempt in range(1, 4):
+            if calls >= max_calls:
+                write(output, current)
+                return current
+            response = chat(config["generation_llm"], messages)
+            calls += 1
+            value, error = None, None
+            try:
+                value = parse_json(response["text"])
+                if not isinstance(value, dict):
+                    error = "Response must be a JSON object"
+                elif digest(value.get("spec")) != digest(item["spec"]):
+                    error = "spec must exactly match the supplied keys, values and JSON types"
+                elif not isinstance(value.get("question"), str) or not value["question"].strip():
+                    error = "question must be a nonempty string"
+            except (ValueError, TypeError) as exc:
+                error = f"Invalid JSON: {exc}"
+            if error is None:
+                break
+            append(failure_path, {"question_id": item["id"], "attempt": attempt,
+                                  "expected_spec": item["spec"],
+                                  "received_spec": value.get("spec") if isinstance(value, dict) else None,
+                                  "error": error, "response": response,
+                                  "generation_config_hash": generation_hash})
+            print(f"Question {item['id']} attempt {attempt}/3 rejected: {error}. "
+                  f"Details: {failure_path}", flush=True)
+            if attempt == 3:
+                write(output, current)
+                raise ValueError(f"Question {item['id']} failed validation after 3 attempts. "
+                                 f"Expected spec: {json.dumps(item['spec'])}. "
+                                 f"Full responses: {failure_path}")
+            messages.extend([
+                {"role": "assistant", "content": response["text"]},
+                {"role": "user", "content": f"Validation failed: {error}. Rewrite the response. "
+                 "Return only a JSON object with question and spec. Copy this spec exactly, "
+                 "including every key and no additional spec fields: " + json.dumps(item["spec"])}])
         # Structural validation is not proof of natural-language equivalence.
         # The formal spec is included at evaluation; audit wording separately.
         item.update(question=value["question"].strip(), question_origin="llm_generated",
-                    generation={"model": config["generation_llm"]["model"], **response},
+                    generation={"model": config["generation_llm"]["model"], **response,
+                                "prompt_version": "exact-spec-repair-v2", "attempts": attempt},
                     semantic_review="pending")
         current["metadata"]["generation_status"] = "partial"
         write(output, current)
+        print(f"Generated {item['id']} ({calls}/{max_calls} requests this run)", flush=True)
     if all(q["question_origin"] == "llm_generated" for q in current["questions"]):
         current["metadata"]["generation_status"] = "complete"
     write(output, current)

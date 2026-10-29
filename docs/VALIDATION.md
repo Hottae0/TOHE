@@ -43,3 +43,7 @@ The latter writes a separate short-run config, embeddings, metrics, task specs a
 ## Qwen-only configuration revision
 
 Question generation and evaluation both use Qwen2.5-7B-Instruct through the same local endpoint. Full/small CPU and CUDA profiles are provided. GPT profiles were removed. Existing generated-question caches must not be resumed with a changed generator; use a fresh ROOT. Same-model generation/evaluation bias remains. GPU training and live vLLM were not executed locally.
+
+## Question-generation validation repair
+
+14 tests pass locally, including malformed JSON and changed-spec correction, full rejection logging, bounded request budgets, repeated failure without accepting invalid questions, and resume. Invalid responses now trigger up to three attempts with exact-spec feedback, each counted against max-calls. Existing completed questions are retained; newly generated questions record prompt_version=exact-spec-repair-v2. The user's Qwen rejection has not been reproduced live locally; full server responses are needed to establish the exact mismatch.
