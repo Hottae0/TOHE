@@ -18,6 +18,10 @@ The reviewer sometimes returned a prose string in interpreted_spec instead of an
 
 Existing audited-v3 caches and accepted questions can resume; new successful reviews record review_protocol=structured-v1. The generic review shape changed without changing the writer or graph semantics. No checkpoint regeneration or file deletion is needed. If the server rejects response_format with HTTP 400, inspect vLLM version/support rather than silently disabling validation. Only review calls use constrained output; QA evaluator decoding remains the same across all conditions.
 
+### Common-parent reviewer regression
+
+The live reviewer incorrectly interpreted the bound variable P as a literal reachability target, despite a correct two-parent intersection question. The review prompt now includes balanced demonstrations of all three operations instead of a reachability-only example and explicitly distinguishes bound output variables. Reviewer-invented IDs and contradictions between task type and path semantics are diagnosed against the question itself and retry the review, preserving valid wording. New reviews record review_protocol=balanced-v2; existing accepted questions remain resumable. Run `python scripts/check_reviewer.py --config "$CONFIG"` for six live positive/negative integration checks before a long generation run. A format error cannot count as a successful negative control.
+
 ## Existing server run
 
 Keep the same ROOT and config so the evidence and checkpoints are reused. Do not run prepare, specs or train again. The Qwen server can remain running.
