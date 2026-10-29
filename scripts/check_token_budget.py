@@ -31,8 +31,9 @@ for q in dataset["questions"]:
                               for field in ("codes", "embeddings")}
             values = cache[key]["embeddings" if condition.startswith("raw_") else "codes"]
         prompt = serialize(item, condition, values)
-        n = len(tokenizer.apply_chat_template([{"role": "user", "content": prompt}],
-                                             tokenize=True, add_generation_prompt=True))
+        rendered = tokenizer.apply_chat_template([{"role": "user", "content": prompt}],
+                                                 tokenize=False, add_generation_prompt=True)
+        n = len(tokenizer(rendered, add_special_tokens=False)["input_ids"])
         count += 1
         if n > maximum.get(condition, {}).get("prompt_tokens", 0):
             maximum[condition] = dict(question_id=q["id"], prompt_tokens=n,
