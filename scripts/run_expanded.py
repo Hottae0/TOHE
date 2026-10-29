@@ -16,6 +16,7 @@ parser.add_argument("--root", required=True)
 parser.add_argument("--source-root", required=True)
 parser.add_argument("--tokenizer-python", default=".venv-vllm/bin/python")
 parser.add_argument("--phase", choices=["prepare", "dev", "test"], default="dev")
+parser.add_argument("--context-limit", type=int, default=16384)
 args = parser.parse_args()
 cfg = read(args.config)
 root, storage, source = (Path(p).resolve() for p in (args.root, args.storage_root, args.source_root))
@@ -73,12 +74,12 @@ try:
         with urllib.request.urlopen(model_url, timeout=30) as response:
             models = json.load(response)["data"]
         model = next(x for x in models if x["id"] == cfg["llm"]["model"])
-        if model.get("max_model_len", 0) < 8192:
-            raise ValueError("Raw coordinates require the checked 8192-token server configuration")
+        if model.get("max_model_len", 0) < args.context_limit:
+            raise ValueError(f"Raw coordinates require a server context limit of {args.context_limit}")
         subprocess.run([args.tokenizer_python, str(run.with_name("check_token_budget.py")),
                         "--config", str(config_path), "--qa", str(root / "data/qa.audited-v3.json"),
                         "--checkpoints", str(root / "checkpoints"),
-                        "--output", str(root / "token-budget.json"), "--limit", "8192"], check=True)
+                        "--output", str(root / "token-budget.json"), "--limit", str(args.context_limit)], check=True)
         limit = str(sum(q["split"] == args.phase for q in qa["questions"]) * len(cfg["conditions"]))
         stage("evaluate", "--split", args.phase, "--max-calls", limit)
         stage("report", "--split", args.phase)

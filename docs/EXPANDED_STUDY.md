@@ -20,7 +20,7 @@ Taeyeong is mounted at **/home/work/pilot_experiment1**, not /home/work/Taeyeong
 
 The GPU holds Qwen once; it does not hold 1,200 models concurrently. Embeddings are fitted one context at a time and saved to disk. Peak device memory is therefore governed mainly by a single <=80-node fit, not the total number of contexts. A two-epoch four-method memory probe is provided; its checkpoints are diagnostic and never reused as 300-epoch study fits.
 
-Raw float prompts are longer. Set vLLM --max-model-len 8192 and measure actual input+output lengths with the same local Qwen tokenizer and chat template. The launcher checks the server's advertised context limit and checks all QA prompts before evaluation; it does not silently truncate them. Only the existing .venv-vllm environment needs transformers for this check; the training environment does not gain a new dependency.
+Raw float prompts are longer. Set vLLM --max-model-len 16384 and measure actual input+output lengths with the same local Qwen tokenizer and chat template. The launcher checks the server's advertised context limit and checks all QA prompts before evaluation; it does not silently truncate them. Only the existing .venv-vllm environment needs transformers for this check; the training environment does not gain a new dependency.
 
 ## Persistent launcher
 
@@ -38,3 +38,5 @@ python scripts/run_expanded.py \
 The dev phase prepares/copies the source, freezes specs with exclusions, trains, generates/audits, checks token limits, evaluates dev, and writes the report. It does NOT evaluate test. Resume with the same config/source/root after an interruption; existing artifacts are checked. job-status.json and resources-at-start.json are saved to the mounted root. Review development outputs and freeze the protocol before invoking --phase test (16,500 requests).
 
 No graph facts are invented to meet the multi-parent quota. Existing data, checkpoints, API keys and model weights are not copied into public sources. A one-seed result does not establish seed robustness, and added coordinate text does not guarantee better QA.
+
+Live 80-node probe: all four trainers completed two validation epochs with <=24 MiB PyTorch reserved memory; overall GPU free memory remained about 11.6 GiB alongside the running Qwen server. With full unrounded float text, the longest measured probe budget was 11,489 tokens including the 256-token response budget. This exceeds 4,096/8,192, so the study uses a 16,384-token server and checks every actual post-training prompt again before evaluation. These measurements describe one evidence graph; they are resource checks, not accuracy results.
