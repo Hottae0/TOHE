@@ -11,13 +11,19 @@ parser.add_argument("--stage", required=True, choices=["prepare", "train", "spec
 parser.add_argument("--config", default="configs/qwen2.5-7b-cuda.json")
 parser.add_argument("--root", default="runs/evidence-local")
 parser.add_argument("--split", choices=["dev", "test"], default="dev")
+parser.add_argument("--question-mode", choices=["llm", "canonical"], default="llm",
+                    help="canonical is a deterministic diagnostic; reuses evidence/checkpoints")
 parser.add_argument("--max-calls", type=int, default=0, help="Required positive limit for LLM stages; excludes transient HTTP retries")
 args = parser.parse_args()
 cfg, root = read(args.config), Path(args.root)
-graph_path, qa_path = root / "data/graph.json", root / "data/qa.json"
+graph_path, qa_path = root / "data/graph.json", root / "data/qa.audited-v3.json"
+if args.question_mode == "canonical":
+    qa_path = root / "data/qa.canonical-v1.json"
 specs_path, checkpoints = root / "data/specs.json", root / "checkpoints"
 model_slug = re.sub(r"[^A-Za-z0-9._-]", "_", cfg["llm"].get("model") or "unset")
-run_dir = root / "evaluation" / model_slug / args.split
+from tohe.serialize import PROMPT_VERSION
+question_version = "audited-v3" if args.question_mode == "llm" else "canonical-v1"
+run_dir = root / "evaluation" / model_slug / PROMPT_VERSION / question_version / args.split
 
 if args.stage == "prepare":
     from tohe.data import prepare
@@ -46,10 +52,14 @@ elif args.stage == "specs":
     result = make_specs(read(graph_path), cfg, specs_path)
     print(result["metadata"])
 elif args.stage == "generate":
-    from tohe.pipeline import generate_questions
-    if args.max_calls <= 0:
-        parser.error("Set --max-calls for actual LLM generation")
-    result = generate_questions(read(specs_path), cfg, qa_path, args.max_calls)
+    if args.question_mode == "canonical":
+        from tohe.questions import canonical_questions
+        result = canonical_questions(read(specs_path), qa_path)
+    else:
+        from tohe.audited_questions import generate_audited_questions
+        if args.max_calls <= 0:
+            parser.error("Set --max-calls for actual LLM generation")
+        result = generate_audited_questions(read(specs_path), cfg, qa_path, args.max_calls)
     print(result["metadata"])
 elif args.stage == "evaluate":
     from tohe.pipeline import evaluate

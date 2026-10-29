@@ -14,6 +14,24 @@ Rules:
 - For set-valued tasks, answer must be a sorted array of unique node IDs.
 """
 
+PROMPT_VERSION = "prompt-v2"
+
+
+def answer_rules(spec):
+    if spec["type"] == "reachability":
+        return 'Task output: {"answer": true} or {"answer": false}. Follow only outgoing is_a edges.'
+    rules = ('Task output: {"answer": ["NODE_ID", ...]}. Return {"answer": []} if no node qualifies. '
+             'Return a sorted array of unique IDs from the Nodes list, not a count or boolean. '
+             'Copy IDs exactly, including leading zeros. Do not invent or abbreviate IDs.')
+    if spec["type"] == "exact_k":
+        rules += (f' Follow exactly {spec["k"]} outgoing is_a edges from {spec["source"]}. '
+                  'This is path length, not shortest-path distance. Return only endpoints after '
+                  'exactly that many edges; an intermediate node qualifies only if it is also '
+                  'an endpoint of a path of the required length.')
+    else:
+        rules += ' Return the intersection of the two direct outgoing neighbor sets only.'
+    return rules
+
 METADATA = """
 Embedding metadata rules:
 - Embeddings are trained only on this evidence graph. Group IDs are local to it.
@@ -49,5 +67,5 @@ def serialize(item, condition, codes=None):
             lines.append(f"{node} --is_a--> {parent}")
     lines += ["\nQuestion:", item["question"] or "[LLM question generation pending]",
               "\nFormal task specification:", json.dumps(item["spec"], sort_keys=True),
-              item["task_definition"]]
+              item["task_definition"], "\nTask-specific answer rules:", answer_rules(item["spec"])]
     return "\n".join(lines)

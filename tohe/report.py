@@ -31,6 +31,9 @@ def report(run_dir, dataset_path):
         table.append({"condition": condition, "seed": seed, "stratum": stratum, "value": value,
                       "n": len(group), "accuracy": sum(r["correct"] for r in group) / len(group),
                       "invalid_rate": sum(not r["valid"] for r in group) / len(group),
+                      "unknown_id_rate": sum(r.get("error_type") == "unknown_node_id" for r in group) / len(group),
+                      "answer_type_error_rate": sum(r.get("error_type") == "answer_type" for r in group) / len(group),
+                      "parse_error_rate": sum(r.get("error_type") == "invalid_json_or_missing_answer" for r in group) / len(group),
                       "set_f1": float(np.mean(f1s)) if f1s else None,
                       "mean_prompt_tokens": float(np.mean(token_counts)) if token_counts else None,
                       "token_count_coverage": len(token_counts) / len(group)})

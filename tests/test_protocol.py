@@ -14,6 +14,8 @@ from tohe.serialize import serialize
 from tohe.data import synthetic
 from tohe.qa import make_specs, semantic_key
 from tohe.evidence import local_graph, evidence_graphs, train_evidence, check_checkpoint, SCOPE
+from tohe.questions import canonical_question, canonical_questions
+from tohe.audited_questions import generate_audited_questions, review_messages
 
 
 class ProtocolTests(unittest.TestCase):
@@ -77,6 +79,105 @@ class ProtocolTests(unittest.TestCase):
         b = {"type": "common_parents", "left": "X", "right": "Y"}
         self.assertEqual(semantic_key(first, a), semantic_key(second, b))
 
+    def test_canonical_questions_preserve_evidence_and_gold(self):
+        original = make_specs(self.graph, self.config, self.root / "specs.json")
+        with patch("tohe.pipeline.chat") as mock:
+            data = canonical_questions(original, self.root / "canonical.json")
+            mock.assert_not_called()
+        for old, new in zip(original["questions"], data["questions"]):
+            for field in ("id", "split", "spec", "gold", "graph", "semantic_key"):
+                self.assertEqual(old[field], new[field])
+            self.assertEqual(new["question_origin"], "canonical_template")
+            self.assertIsNone(old["question"])
+        wording = canonical_question({"type": "exact_k", "source": "N038", "k": 3})
+        self.assertIn("exactly 3 directed", wording)
+        self.assertIn("even if a shorter path also exists", wording)
+        self.assertNotIn("How many", wording)
+        cfg = dict(self.config, conditions=["direct_id"])
+        with patch("tohe.pipeline.chat", return_value={"text": '{"answer": []}'}) as mock:
+            result = evaluate(data, cfg, self.root / "canonical-eval", self.root / "unused", "dev", 30)
+        self.assertEqual(result["new_records"], 6)
+        self.assertEqual(mock.call_count, 6)
+        data["questions"][0]["question"] = "How many nodes?"
+        # Select the modified question's split so provenance is checked before any call.
+        with patch("tohe.pipeline.chat") as mock:
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                evaluate(data, cfg, self.root / "bad", self.root / "unused",
+                         data["questions"][0]["split"], 30)
+            mock.assert_not_called()
+
+    def test_unknown_ids_and_task_specific_rules(self):
+        self.assertEqual(score_prediction(["N39"], ["N039"], ["N039"])["error_type"], "unknown_node_id")
+        self.assertEqual(score_prediction(False, ["N039"], ["N039"])["error_type"], "answer_type")
+        self.assertTrue(score_prediction(["N039"], ["N039"], ["N039"])["correct"])
+        self.assertTrue(score_prediction([], [], ["N039"])["correct"])
+        data = make_specs(self.graph, self.config, self.root / "qa.json")
+        item = next(q for q in data["questions"] if q["spec"]["type"] == "exact_k")
+        text = serialize(item, "direct_id")
+        self.assertIn("including leading zeros", text)
+        self.assertIn("not shortest-path distance", text)
+        self.assertIn('Return {"answer": []}', text)
+
+    def test_audited_generation_rejects_count_and_wrong_semantics(self):
+        data = make_specs(self.graph, self.config, self.root / "specs.json")
+        item = next(q for q in data["questions"] if q["spec"]["type"] == "exact_k")
+        data["questions"] = [item]
+        spec = item["spec"]
+        valid_question = canonical_question(spec)
+        review = dict(interpreted_spec=spec, answer_kind="node_set", edge_direction="outgoing",
+                      path_semantics="exact_length", ambiguous=False)
+        responses = [
+            {"text": json.dumps({"question": f"How many nodes from {spec['source']}?", "spec": spec})},
+            {"text": json.dumps({"question": valid_question, "spec": spec})},
+            {"text": json.dumps(dict(review, path_semantics="shortest_distance"))},
+            {"text": json.dumps({"question": valid_question, "spec": spec})},
+            {"text": json.dumps(review)}]
+        output = self.root / "audited.json"
+        with patch("tohe.audited_questions.chat", side_effect=responses) as mock:
+            result = generate_audited_questions(data, self.config, output, 5)
+        self.assertEqual(mock.call_count, 5)
+        self.assertEqual(result["metadata"]["generation_status"], "complete")
+        self.assertEqual(result["questions"][0]["semantic_review"], "model_verified_v3")
+        self.assertEqual(result["questions"][0]["gold"], item["gold"])
+        self.assertEqual(len(rows(output.with_suffix(".generation-failures.jsonl"))), 2)
+        review_request = json.loads(mock.call_args_list[-1].args[1][0]["content"])
+        self.assertEqual(set(review_request), {"review_instruction", "question"})
+        self.assertNotIn("gold", review_request)
+        cfg = dict(self.config, conditions=["direct_id"])
+        with patch("tohe.pipeline.chat", return_value={"text": '{"answer": []}'}) as mock:
+            evaluate(result, cfg, self.root / "eval", self.root / "unused", item["split"], 1)
+            self.assertEqual(mock.call_count, 1)
+
+    def test_audited_candidate_resume_and_fail_closed(self):
+        data = make_specs(self.graph, self.config, self.root / "specs.json")
+        data["questions"] = data["questions"][:1]
+        item = data["questions"][0]
+        spec = item["spec"]
+        response = {"text": json.dumps(dict(question=canonical_question(spec), spec=spec))}
+        review = {"text": json.dumps(dict(interpreted_spec=spec, answer_kind="boolean",
+                    edge_direction="outgoing", path_semantics="nonempty_path", ambiguous=False))}
+        output = self.root / "audited.json"
+        with patch("tohe.audited_questions.chat", return_value=response) as mock:
+            partial = generate_audited_questions(data, self.config, output, 1)
+            self.assertEqual(mock.call_count, 1)
+        self.assertIn("generation_candidate", partial["questions"][0])
+        cfg = dict(self.config, conditions=["direct_id"])
+        with patch("tohe.pipeline.chat") as mock:
+            with self.assertRaises(ValueError):
+                evaluate(partial, cfg, self.root / "pending", self.root / "unused", item["split"], 1)
+            mock.assert_not_called()
+        with patch("tohe.audited_questions.chat", return_value=review) as mock:
+            complete = generate_audited_questions(data, self.config, output, 1)
+            self.assertEqual(mock.call_count, 1)
+            self.assertIn("review_instruction", json.loads(mock.call_args.args[1][0]["content"]))
+            generate_audited_questions(data, self.config, output, 1)
+            self.assertEqual(mock.call_count, 1)
+        self.assertEqual(complete["metadata"]["generation_status"], "complete")
+        with patch("tohe.audited_questions.chat", return_value={"text": "{}"}) as mock:
+            with self.assertRaisesRegex(ValueError, "failed 3 attempts"):
+                generate_audited_questions(data, self.config, self.root / "bad-audit.json", 20)
+            self.assertEqual(mock.call_count, 3)
+
     def test_generation_resume_and_scoring_strict_types(self):
         data = make_specs(self.graph, self.config, self.root / "qa.json")
         def fake_chat(config, messages):
@@ -91,6 +192,45 @@ class ProtocolTests(unittest.TestCase):
         self.assertFalse(score_prediction(1, True)["valid"])
         self.assertTrue(score_prediction(["b", "a"], ["a", "b"])["correct"])
         self.assertFalse(score_prediction(["a", "unknown"], ["a"])["correct"])
+
+    def test_generation_repairs_invalid_spec_without_changing_gold(self):
+        data = make_specs(self.graph, self.config, self.root / "specs.json")
+        item = next(q for q in data["questions"] if q["spec"]["type"] == "common_parents")
+        data["questions"] = [item]
+        wrong = {**item["spec"], "extra": True}
+        responses = [
+            {"text": json.dumps({"question": "Which parents?", "spec": wrong})},
+            {"text": "not JSON"},
+            {"text": json.dumps({"question": "Which direct parents are shared?", "spec": item["spec"]})}]
+        output = self.root / "generated.json"
+        with patch("tohe.pipeline.chat", side_effect=responses) as mock:
+            result = generate_questions(data, self.config, output, 3)
+        self.assertEqual(mock.call_count, 3)
+        correction = mock.call_args.args[1][-1]["content"]
+        self.assertIn(json.dumps(item["spec"]), correction)
+        self.assertEqual(result["questions"][0]["spec"], item["spec"])
+        self.assertEqual(result["questions"][0]["gold"], item["gold"])
+        self.assertEqual(result["questions"][0]["generation"]["attempts"], 3)
+        failures = rows(output.with_suffix(".generation-failures.jsonl"))
+        self.assertEqual(len(failures), 2)
+        self.assertEqual(failures[0]["received_spec"], wrong)
+        self.assertEqual(failures[1]["response"]["text"], "not JSON")
+
+    def test_generation_retry_budget_exhaustion_and_resume(self):
+        data = make_specs(self.graph, self.config, self.root / "specs.json")
+        data["questions"] = data["questions"][:1]
+        output = self.root / "generated.json"
+        with patch("tohe.pipeline.chat", return_value={"text": "{}"}) as mock:
+            partial = generate_questions(data, self.config, output, 1)
+            self.assertEqual(mock.call_count, 1)
+            self.assertEqual(partial["questions"][0]["question_origin"], "awaiting_llm_generation")
+            with self.assertRaisesRegex(ValueError, "failed validation after 3 attempts"):
+                generate_questions(data, self.config, output, 20)
+            self.assertEqual(mock.call_count, 4)
+        spec = data["questions"][0]["spec"]
+        with patch("tohe.pipeline.chat", return_value={"text": json.dumps({"question": "Which nodes?", "spec": spec})}):
+            complete = generate_questions(data, self.config, output, 1)
+        self.assertEqual(complete["metadata"]["generation_status"], "complete")
 
     def test_four_trainers_and_seven_condition_dry_run(self):
         data = make_specs(self.graph, self.config, self.root / "qa.json")
@@ -178,8 +318,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_evaluation_resume_and_report_with_mock_predictions(self):
         data = make_specs(self.graph, self.config, self.root / "qa.json")
-        for q in data["questions"]:
-            q.update(question="Test-only mock wording", question_origin="llm_generated")
+        data = canonical_questions(data, self.root / "canonical.json")
         write(self.root / "qa.json", data)
         cfg = dict(self.config, conditions=["direct_id", "direct_bfs", "direct_dfs"])
         response = {"text": '{"answer": false}', "usage": {"prompt_tokens": 100}, "seconds": 0.1}

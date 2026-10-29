@@ -1,9 +1,10 @@
 import copy
+import json
 import os
 from pathlib import Path
 from .io import append, digest, read, rows, write
 from .llm import chat, parse_json
-from .serialize import serialize
+from .serialize import serialize, PROMPT_VERSION
 
 
 def generate_questions(dataset, config, output, max_calls):
@@ -29,37 +30,76 @@ def generate_questions(dataset, config, output, max_calls):
         instruction = {
             "instruction": "Write one clear English graph question for this exact task. Do not solve it. Do not change IDs, direction, quantifiers, or k. Return JSON with question and an exact copy of spec.",
             "spec": item["spec"], "definition": item["task_definition"]}
-        response = chat(config["generation_llm"], [{"role": "user", "content": __import__("json").dumps(instruction)}])
-        calls += 1
-        value = parse_json(response["text"])
-        if value.get("spec") != item["spec"] or not isinstance(value.get("question"), str) or not value["question"].strip():
-            raise ValueError(f"Invalid LLM question for {item['id']}; raw output: {response['text'][:200]}")
+        instruction["response_example"] = {"question": "<one English question>", "spec": item["spec"]}
+        messages = [{"role": "user", "content": json.dumps(instruction)}]
+        failure_path = output.with_suffix(".generation-failures.jsonl")
+        for attempt in range(1, 4):
+            if calls >= max_calls:
+                write(output, current)
+                return current
+            response = chat(config["generation_llm"], messages)
+            calls += 1
+            value, error = None, None
+            try:
+                value = parse_json(response["text"])
+                if not isinstance(value, dict):
+                    error = "Response must be a JSON object"
+                elif digest(value.get("spec")) != digest(item["spec"]):
+                    error = "spec must exactly match the supplied keys, values and JSON types"
+                elif not isinstance(value.get("question"), str) or not value["question"].strip():
+                    error = "question must be a nonempty string"
+            except (ValueError, TypeError) as exc:
+                error = f"Invalid JSON: {exc}"
+            if error is None:
+                break
+            append(failure_path, {"question_id": item["id"], "attempt": attempt,
+                                  "expected_spec": item["spec"],
+                                  "received_spec": value.get("spec") if isinstance(value, dict) else None,
+                                  "error": error, "response": response,
+                                  "generation_config_hash": generation_hash})
+            print(f"Question {item['id']} attempt {attempt}/3 rejected: {error}. "
+                  f"Details: {failure_path}", flush=True)
+            if attempt == 3:
+                write(output, current)
+                raise ValueError(f"Question {item['id']} failed validation after 3 attempts. "
+                                 f"Expected spec: {json.dumps(item['spec'])}. "
+                                 f"Full responses: {failure_path}")
+            messages.extend([
+                {"role": "assistant", "content": response["text"]},
+                {"role": "user", "content": f"Validation failed: {error}. Rewrite the response. "
+                 "Return only a JSON object with question and spec. Copy this spec exactly, "
+                 "including every key and no additional spec fields: " + json.dumps(item["spec"])}])
         # Structural validation is not proof of natural-language equivalence.
         # The formal spec is included at evaluation; audit wording separately.
         item.update(question=value["question"].strip(), question_origin="llm_generated",
-                    generation={"model": config["generation_llm"]["model"], **response},
+                    generation={"model": config["generation_llm"]["model"], **response,
+                                "prompt_version": "exact-spec-repair-v2", "attempts": attempt},
                     semantic_review="pending")
         current["metadata"]["generation_status"] = "partial"
         write(output, current)
+        print(f"Generated {item['id']} ({calls}/{max_calls} requests this run)", flush=True)
     if all(q["question_origin"] == "llm_generated" for q in current["questions"]):
         current["metadata"]["generation_status"] = "complete"
     write(output, current)
     return current
 
 
-def score_prediction(prediction, gold):
+def score_prediction(prediction, gold, nodes=None):
     if isinstance(gold, bool):
         valid = isinstance(prediction, bool)
-        return {"valid": valid, "correct": valid and prediction == gold, "set_f1": None}
+        return {"valid": valid, "correct": valid and prediction == gold, "set_f1": None,
+                "error_type": None if valid else "answer_type"}
     valid = isinstance(prediction, list) and all(isinstance(v, str) for v in prediction)
     if not valid:
-        return {"valid": False, "correct": False, "set_f1": 0.0}
+        return {"valid": False, "correct": False, "set_f1": 0.0, "error_type": "answer_type"}
+    if nodes is not None and set(prediction) - set(nodes):
+        return {"valid": False, "correct": False, "set_f1": 0.0, "error_type": "unknown_node_id"}
     actual, expected = set(prediction), set(gold)
     if not actual and not expected:
         f1 = 1.0
     else:
         f1 = 2 * len(actual & expected) / (len(actual) + len(expected))
-    return {"valid": True, "correct": actual == expected, "set_f1": f1}
+    return {"valid": True, "correct": actual == expected, "set_f1": f1, "error_type": None}
 
 
 def evaluate(dataset, config, run_dir, checkpoint_dir, split, max_calls, dry_run=False):
@@ -68,6 +108,7 @@ def evaluate(dataset, config, run_dir, checkpoint_dir, split, max_calls, dry_run
     from .evidence import SCOPE, evidence_graphs, checkpoint_path, check_checkpoint
     if config.get("embedding_scope") != SCOPE:
         raise ValueError("Evaluation requires the evidence-local protocol config")
+    from .questions import CANONICAL_VERSION, canonical_question
     graphs = evidence_graphs(dataset, split)
     # Preflight before spending API calls. Load each evidence/method/seed once,
     # then reuse its codes across all questions sharing that context.
@@ -82,9 +123,32 @@ def evaluate(dataset, config, run_dir, checkpoint_dir, split, max_calls, dry_run
                 check_checkpoint(checkpoint, graph, config, condition, seed)
                 codes = dict(zip(checkpoint["nodes"], checkpoint["codes"].tolist()))
                 cached[(context_id, condition, seed)] = (codes, hashlib.sha256(path.read_bytes()).hexdigest())
+    from .audited_questions import review_error, wording_error
+    for item in dataset["questions"]:
+        if item["split"] != split or dry_run:
+            continue
+        if item["question_origin"] == "canonical_template":
+            if (dataset["metadata"].get("question_mode") != CANONICAL_VERSION
+                    or item["question"] != canonical_question(item["spec"])):
+                raise ValueError("Canonical question does not match its specification")
+        elif item["question_origin"] == "llm_generated":
+            if item.get("semantic_review") != "model_verified_v3":
+                raise ValueError("LLM questions require audited-v3 semantic review; regenerate questions")
+            try:
+                error = wording_error(item["question"], item["spec"]) or review_error(
+                    parse_json(item["semantic_audit"]["text"]), item["spec"])
+                if item["semantic_audit"].get("question_hash") != digest(item["question"]):
+                    error = "Question text changed after semantic review"
+            except (ValueError, KeyError, TypeError):
+                error = "Missing or invalid semantic audit"
+            if error:
+                raise ValueError(f"Question {item['id']} failed semantic validation: {error}")
+        else:
+            raise ValueError("Generate questions first; unsupported question origin")
     run_dir = Path(run_dir)
     manifest = {"dataset_hash": digest(dataset), "config_hash": digest(config), "split": split,
                 "dry_run": dry_run, "conditions": config["conditions"],
+                "prompt_version": PROMPT_VERSION,
                 "endpoint_hash": digest(os.environ.get(config["llm"]["endpoint_env"])),
                 "embedding_scope": SCOPE,
                 "evidence_graph_hashes": {key: graph["graph_hash"] for key, graph in graphs.items()}}
@@ -102,8 +166,6 @@ def evaluate(dataset, config, run_dir, checkpoint_dir, split, max_calls, dry_run
             for item in dataset["questions"]:
                 if item["split"] != split:
                     continue
-                if not dry_run and item["question_origin"] != "llm_generated":
-                    raise ValueError("Generate real LLM questions first; template/mock questions are not research QA")
                 codes, ckpt_hash = (None, None) if seed is None else cached[(item["context_id"], condition, seed)]
                 prompt = serialize(item, condition, codes)
                 key = f"{condition}/{seed}/{item['id']}"
@@ -126,9 +188,15 @@ def evaluate(dataset, config, run_dir, checkpoint_dir, split, max_calls, dry_run
                     response = chat(config["llm"], [{"role": "user", "content": prompt}])
                     try:
                         predicted = parse_json(response["text"])["answer"]
-                    except (ValueError, KeyError):
+                    except (ValueError, KeyError, TypeError):
                         predicted = None
+                        parse_error = True
+                    else:
+                        parse_error = False
+                    scores = score_prediction(predicted, item["gold"], item["graph"]["nodes"])
+                    if parse_error:
+                        scores["error_type"] = "invalid_json_or_missing_answer"
                     append(records_path, {**base, **response, "prediction": predicted,
-                                          "gold": item["gold"], **score_prediction(predicted, item["gold"])})
+                                          "gold": item["gold"], **scores})
                 calls += 1
     return {"new_records": calls, "stopped_at_limit": False}
