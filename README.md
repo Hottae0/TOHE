@@ -34,6 +34,7 @@ git clone --branch codex/wordnet-pilot https://github.com/Hottae0/TOHE.git
 cd TOHE
 python -m venv .venv
 source .venv/bin/activate
+python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 python -m pip install -e .
 python -m unittest discover -s tests -v
 ```
