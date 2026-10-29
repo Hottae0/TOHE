@@ -19,4 +19,13 @@ for name, profile in profiles.items():
         cuda = deepcopy(config)
         cuda["training"]["device"] = "cuda"
         write(f"configs/{prefix}{name}-cuda.json", cuda)
+    expanded = deepcopy(profile)
+    expanded["protocol"] = "wordnet-evidence-local-expanded-raw-v1"
+    expanded["training"]["seeds"] = [11]
+    expanded["qa"].update(multi_parent_graphs=30, multi_parent_nodes_per_graph=[80],
+                          serialization_traversal="weak", require_distinct_orders=True)
+    expanded["conditions"] += [f"raw_{v}" for v in ("euclidean", "poincare", "v1", "v2")]
+    write(f"configs/expanded-{name}.json", expanded)
+    expanded["training"]["device"] = "cuda"
+    write(f"configs/expanded-{name}-cuda.json", expanded)
     print(f"Wrote full and small configs for {name}")

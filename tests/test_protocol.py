@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 import torch
-from tohe.graph import answer, closure
+from tohe.graph import answer, closure, traversal
 from tohe.io import read, write, rows
 from tohe.model import FixedSerializerGeometry, distance, train, embedding_metrics
 from tohe.pipeline import score_prediction, generate_questions, evaluate
@@ -60,6 +60,30 @@ class ProtocolTests(unittest.TestCase):
             self.assertEqual(actual, expected)
             self.assertNotIn('"gold"', text)
             self.assertNotIn("original_ids", text)
+
+    def test_weak_ordering_raw_coordinates_and_excluded_questions(self):
+        graph = {"nodes": ["N000", "N001", "N002", "N003", "N004"],
+                 "edges": [["N001", "N000"], ["N002", "N000"], ["N003", "N001"], ["N004", "N002"]]}
+        self.assertNotEqual(traversal(graph, "bfs", "weak"), traversal(graph, "dfs", "weak"))
+        prior = make_specs(self.graph, self.config, self.root / "prior.json")
+        cfg = copy.deepcopy(self.config)
+        cfg["seed"] = 123
+        cfg["qa"].update(serialization_traversal="weak", require_distinct_orders=True,
+                         multi_parent_graphs=1, multi_parent_nodes_per_graph=[8])
+        data = make_specs(self.graph, cfg, self.root / "expanded.json", prior)
+        self.assertFalse({q["semantic_key"] for q in prior["questions"]} & {q["semantic_key"] for q in data["questions"]})
+        self.assertEqual(data["metadata"]["excluded_prior_questions"], 12)
+        self.assertEqual(data["metadata"]["bfs_dfs_distinct_contexts"], 2)
+        self.assertGreaterEqual(data["metadata"]["multi_parent_contexts"], 1)
+        item = data["questions"][0]
+        vector = [0.12345678901234567, -0.002345678901234567, 1e-19, 0.0, 0.123]
+        vectors = {n: vector for n in item["graph"]["original_ids"].values()}
+        text = serialize(item, "raw_v2", vectors)
+        self.assertIn(json.dumps(vector), text)
+        self.assertNotIn("radial_bin=", text)
+        self.assertIn("curvature -1", text)
+        for u, v in item["graph"]["edges"]:
+            self.assertIn(f"{u} --is_a--> {v}", text)
 
     def test_task_balance_unique_contexts_and_provenance(self):
         data = make_specs(self.graph, self.config, self.root / "qa.json")
@@ -312,6 +336,14 @@ class ProtocolTests(unittest.TestCase):
         result = evaluate(data, self.config, self.root / "eval", self.root / "checkpoints", "test", 1000, True)
         self.assertEqual(result["new_records"], 42)
         self.assertEqual(len(rows(self.root / "eval/prompts.jsonl")), 42)
+        raw_cfg = dict(self.config, conditions=self.config["conditions"] +
+                       ["raw_euclidean", "raw_poincare", "raw_v1", "raw_v2"])
+        with patch("tohe.model.train", side_effect=AssertionError("Raw arms must reuse embeddings")):
+            raw = evaluate(data, raw_cfg, self.root / "raw-eval", self.root / "checkpoints", "test", 1000, True)
+        self.assertEqual(raw["new_records"], 66)
+        raw_rows = [r for r in rows(self.root / "raw-eval/prompts.jsonl") if r["condition"].startswith("raw_")]
+        self.assertEqual(len(raw_rows), 24)
+        self.assertTrue(all("coordinates=" in r["prompt"] for r in raw_rows))
         again = evaluate(data, self.config, self.root / "eval", self.root / "checkpoints", "test", 1000, True)
         self.assertEqual(again["new_records"], 0)
         with self.assertRaises(ValueError):

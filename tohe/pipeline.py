@@ -118,10 +118,12 @@ def evaluate(dataset, config, run_dir, checkpoint_dir, split, max_calls, dry_run
             continue
         for seed in config["training"]["seeds"]:
             for context_id, graph in graphs.items():
-                path = checkpoint_path(checkpoint_dir, context_id, condition, seed)
+                variant = condition.removeprefix("raw_")
+                path = checkpoint_path(checkpoint_dir, context_id, variant, seed)
                 checkpoint = torch.load(path, map_location="cpu", weights_only=True)
-                check_checkpoint(checkpoint, graph, config, condition, seed)
-                codes = dict(zip(checkpoint["nodes"], checkpoint["codes"].tolist()))
+                check_checkpoint(checkpoint, graph, config, variant, seed)
+                values = checkpoint["embeddings"] if condition.startswith("raw_") else checkpoint["codes"]
+                codes = dict(zip(checkpoint["nodes"], values.tolist()))
                 cached[(context_id, condition, seed)] = (codes, hashlib.sha256(path.read_bytes()).hexdigest())
     from .audited_questions import review_error, wording_error
     for item in dataset["questions"]:

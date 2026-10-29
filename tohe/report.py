@@ -19,8 +19,11 @@ def report(run_dir, dataset_path):
     groups = defaultdict(list)
     for row in data:
         groups[(row["condition"], row["seed"], "all", "all")].append(row)
-        for name in ("task", "node_count", "answer_size", "k", "shortest_path"):
-            value = row["strata"][name]
+        if row["strata"].get("answer_empty") is not None:
+            label = f"{row['strata']['task']}/empty={row['strata']['answer_empty']}"
+            groups[(row["condition"], row["seed"], "task_answer_empty", label)].append(row)
+        for name in ("task", "node_count", "answer_size", "k", "shortest_path", "answer_empty", "has_multi_parent", "bfs_dfs_distinct"):
+            value = row["strata"].get(name)
             if value is not None:
                 groups[(row["condition"], row["seed"], name, str(value))].append(row)
     table = []
@@ -61,7 +64,13 @@ def report(run_dir, dataset_path):
                             "paired_graphs": len(deltas),
                             "accuracy_delta_vs_direct_id": float(deltas.mean()) if len(deltas) else None,
                             "graph_bootstrap_95_interval": interval})
-    result = {"comparisons": comparisons, "limitations": [
+    selected = [q for q in dataset["questions"] if q["split"] == manifest["split"]]
+    constant_correct = sum(q["gold"] is False if isinstance(q["gold"], bool) else q["gold"] == [] for q in selected)
+    result = {"comparisons": comparisons,
+              "fixed_response_baseline": {"policy": "false for reachability; [] for set tasks",
+                                           "correct": constant_correct, "n": len(selected),
+                                           "accuracy": constant_correct / len(selected)},
+              "limitations": [
         "Intervals conditional on the observed evidence collection; contexts can share entities.",
         "Seed-specific results are reported separately, never counted as independent questions.",
         "No confidence interval is reported for incomplete runs."]}
