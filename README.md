@@ -41,6 +41,38 @@ python -m unittest discover -s tests -v
 
 선택적으로 `docker build -t tohe .`로 CPU 실험 이미지를 만들 수 있습니다. 컨테이너에는 Qwen 서버가 포함되지 않습니다. 실행 기록은 볼륨으로 보존하세요.
 
+## 빠른 소규모 실행
+
+처음에는 `configs/small-gpt4o-mini.json`을 권장합니다. 합성 데이터 smoke test가 아니라 **같은 WordNet mammals와 7개 비교군을 사용하는 짧은 진단 실험**입니다. 전체 설정은 유지됩니다.
+
+| 항목 | 전체 설정 | Small 설정 |
+|---|---|---|
+| epochs / burn-in | 300 / 20 | 30 / 3 |
+| 학습 seeds | 3개 | 1개 |
+| QA | 1,800개 | 120개 (유형별 40개) |
+| 개발 / 테스트 QA | 300 / 1,500 | 30 / 90 |
+| 문맥당 노드 | 20·40·80 | 20·40 |
+| LLM 하나의 테스트 요청 | 22,500회 | 630회 |
+
+학습 원본 그래프, 손실 정의·가중치, 차원, batch size, negative 수, 코드 변환과 영어 프롬프트는 동일합니다. 학습 epoch×seed 작업량은 1/30이며 실제 시간은 서버에 따라 다릅니다. 낮은 정확도가 나오더라도 짧은 학습·작은 표본의 영향과 방법 자체의 한계를 구분해야 합니다. 논문용 최종 결과로 사용하지 마세요.
+
+설치와 아래 LLM 환경변수 설정 후, **전체 실험과 다른 저장 경로**로 실행합니다:
+
+```bash
+CONFIG=configs/small-gpt4o-mini.json
+ROOT=runs/small
+python scripts/run_experiment.py --stage prepare --config "$CONFIG" --root "$ROOT"
+python scripts/run_experiment.py --stage specs --config "$CONFIG" --root "$ROOT"
+python scripts/run_experiment.py --stage train --config "$CONFIG" --root "$ROOT"
+python scripts/run_experiment.py --stage generate --config "$CONFIG" --root "$ROOT" --max-calls 120
+python scripts/run_experiment.py --stage evaluate --config "$CONFIG" --root "$ROOT" --split dev --max-calls 210
+python scripts/run_experiment.py --stage report --config "$CONFIG" --root "$ROOT" --split dev
+python scripts/run_experiment.py --stage evaluate --config "$CONFIG" --root "$ROOT" --split test --max-calls 630
+python scripts/run_experiment.py --stage report --config "$CONFIG" --root "$ROOT" --split test
+```
+
+Qwen을 추가로 비교할 때는 `CONFIG=configs/small-qwen2.5-7b.json`으로 바꾸고 **같은 ROOT에서 evaluate/report만** 실행합니다. 질문 생성·학습을 반복하지 않습니다. 처음 GPT 모델 하나만 돌려도 됩니다. Small도 의미 기준 QA 중복 제거를 동일하게 적용합니다. 이미 전체 실험을 실행 중이라면 해당 실행을 자동으로 변경하거나 중단하지 않습니다.
+
 ## 1. 데이터 준비
 
 ```bash
