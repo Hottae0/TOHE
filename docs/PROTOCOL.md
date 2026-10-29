@@ -2,19 +2,21 @@
 
 ## Scope fixed in the conversation
 
-Seven main conditions only; WordNet mammals reconstruction; graph → text → frozen LLM; English prompts; original direct facts preserved; fixed serializer; no learned quantizer or LLM tuning. Loss-component ablation code was explicitly deferred by the user.
+Seven main conditions only; evidence-local reconstruction on WordNet mammals subgraphs; graph → text → frozen LLM; English prompts; original direct facts preserved; fixed serializer; no learned quantizer or LLM tuning. Loss-component ablation code was explicitly deferred by the user.
 
 The original conversation specified objective families, not complete executable equations. The choices below make them executable. They are **implementation choices requiring development-set validation**, not equations reproduced from a published TOHE paper.
 
 ## Source protocol
 
-[Poincare Embeddings](https://arxiv.org/abs/1705.08039) studies WordNet noun transitive closure using reconstruction and held-out links. We use the official small mammals reconstruction route, not WN18RR and not new-entity generalization.
+[Poincare Embeddings](https://arxiv.org/abs/1705.08039) studies WordNet noun transitive closure using reconstruction and held-out links. We use its mammals preprocessing as the source graph, then create fixed evidence subgraphs and fit each separately. This local QA protocol is not the original full-mammals reconstruction experiment, WN18RR, or inductive new-entity inference.
 
 Reference repository: [facebookresearch/poincare-embeddings](https://github.com/facebookresearch/poincare-embeddings), commit `dff101b5089a635a751aa45e3a6cb21670a3588e`.
 
 Its mammals script specifies d=5, lr=0.3, 300 epochs, 50 negatives, 20 burn-in epochs, batch size 10. These populate our initial config. This repository uses synchronous dense Riemannian SGD rather than the upstream asynchronous sparse implementation. It is an independent implementation, **not a numerically exact reproduction**. The source data was separately compared with the upstream preprocessing output; see VALIDATION.md.
 
-Direct edges are child → immediate hypernym, including instance hypernyms. All applicable parents are preserved. Training relations are the filtered transitive closure. The upstream filter applies to training pairs, not a request to turn closure relations into direct evidence edges.
+Direct edges are child → immediate hypernym, including instance hypernyms. All applicable parents in each evidence are preserved. The upstream preprocessing defines the source graph. Actual QA embedding training recomputes the closure from the visible evidence edges only. It never slices the global closure: an A → X → B path contributes nothing when X is outside evidence. Global pretrained embeddings are never used for initialization.
+
+Run prepare → specs → train → generate → evaluate → report. A checkpoint is stored at `<context_id>/<method>-<seed>.pt` and reused for the six questions of that evidence. It contains only evidence nodes. Graph hashes are recomputed from visible nodes/edges, including isolated nodes, rather than trusting dataset hash labels. Checkpoints from the old global protocol are rejected. Every embedding checkpoint required by a split is verified before any evaluation API calls. Small runs fit 20 × 4 × 1 = 80 local models; full runs fit 300 × 4 × 3 = 3,600.
 
 ## Embeddings and fixed text codes
 
@@ -36,7 +38,9 @@ Hard argmax/nearest assignments are used at inference and for code metrics. tau=
 
 ## Common graph loss
 
-For observed child/ancestor pair (u,v), sample negatives w for which (u,w) is not an observed training pair, excluding self. Use sampled cross entropy over the positive and negative candidates with score -d(u,v). Poincare uses hyperbolic distance; Euclidean uses squared Euclidean distance as in the original baseline family. All conditions use the same observed pairs, seed-specific sampling procedure, dimension, epoch budget and batch size.
+For observed local child/ancestor pair (u,v), sample negatives w only from that evidence's nodes for which (u,w) is not a local observed training pair, excluding self. Use sampled cross entropy over the positive and negative candidates with score -d(u,v). Poincare uses hyperbolic distance; Euclidean uses squared Euclidean distance as in the original baseline family. All conditions use the same observed pairs, seed-specific sampling procedure, dimension, epoch budget and batch size.
+
+If a source has no valid local negatives, omit that source's pairs from the contrastive graph loss but keep their applicable auxiliary terms. Self indices used for tensor padding have masked scores and are rejected as incomparable negatives. No external nodes or false negatives are substituted. Record `sampling.no_negative_pairs` in each checkpoint. If every pair is ineligible, base models have zero graph gradient; such graph metrics are trivial and should not support a performance claim. Graphs with no observed relations fail explicitly.
 
 This is a conventional sampled-softmax implementation. Upstream negative distributions, self candidates, score normalization, parallel update ordering and ranking ties can differ. Consequently local MAP/Rank should not be placed beside published table numbers as an exact reproduction without separately running the official evaluator.
 
@@ -85,4 +89,4 @@ Questions are generated once and shared across all conditions, seeds and evaluat
 - Actual prompt tokens from endpoint usage; no token parity claim. All facts remain present.
 - Per-seed reports and graph-cluster paired bootstrap versus Direct ID. Context overlap limits interpretation of confidence intervals; they do not establish unseen-entity generalization.
 
-Global embedding training can encode relations beyond the local evidence context. All embedding methods share that training graph, but Direct Text receives only the local context. This is a transductive graph-informed representation study; an equal-local-information claim requires a separate evidence-local experiment later.
+Every main condition now starts from the same visible evidence. Embedding fitting remains transductive within each observed subgraph, and its cost must be counted. No graph weights are transferred from development to test evidence; only development-selected hyperparameters and the fixed serializer are shared. Different contexts can still share entities/structure, so entity-disjoint generalization is not established.

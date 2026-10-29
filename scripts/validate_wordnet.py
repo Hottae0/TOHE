@@ -3,22 +3,19 @@ import sys
 from pathlib import Path
 from collections import Counter
 from tohe.io import read, write
-from tohe.model import train, embedding_metrics
+from tohe.evidence import train_evidence
 from tohe.qa import make_specs
 from tohe.pipeline import evaluate
 
 graph = read(sys.argv[1])
 root = Path(sys.argv[2])
-cfg = read("configs/pilot.json")
+cfg = read("configs/small-qwen2.5-7b.json")
 cfg["protocol"] = "real-wordnet-two-epoch-validation-NOT-final-results"
 cfg["training"].update(epochs=2, batch_size=128, negatives=10, seeds=[11], burnin_epochs=1)
 write(root / "config.json", cfg)
-results = {}
-for condition in ("euclidean", "poincare", "v1", "v2"):
-    checkpoint = train(graph, cfg, condition, 11, root / "checkpoints" / f"{condition}-11.pt")
-    results[condition] = embedding_metrics(graph, checkpoint)
-write(root / "embedding-validation.json", results)
 qa = make_specs(graph, cfg, root / "qa-specs.json")
+results = train_evidence(qa, cfg, root / "checkpoints")
+write(root / "embedding-validation.json", results)
 dry = evaluate(qa, cfg, root / "dry-run", root / "checkpoints", "test", 20000, True)
 write(root / "validation-summary.json", {"graph_hash": graph["graph_hash"],
       "graph_metadata": graph["metadata"], "qa_metadata": qa["metadata"],

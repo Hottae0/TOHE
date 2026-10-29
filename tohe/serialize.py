@@ -16,6 +16,7 @@ Rules:
 
 METADATA = """
 Embedding metadata rules:
+- Embeddings are trained only on this evidence graph. Group IDs are local to it.
 - A smaller radial_bin indicates a smaller distance from the embedding origin.
   It does not necessarily indicate graph depth.
 - Nodes in the same direction_group have similar embedding directions.

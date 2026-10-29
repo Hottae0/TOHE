@@ -59,7 +59,7 @@ def report(run_dir, dataset_path):
                             "accuracy_delta_vs_direct_id": float(deltas.mean()) if len(deltas) else None,
                             "graph_bootstrap_95_interval": interval})
     result = {"comparisons": comparisons, "limitations": [
-        "Intervals conditional on this transductive WordNet graph; evidence contexts can share entities.",
+        "Intervals conditional on the observed evidence collection; contexts can share entities.",
         "Seed-specific results are reported separately, never counted as independent questions.",
         "No confidence interval is reported for incomplete runs."]}
     write(run_dir / "paired_comparisons.json", result)

@@ -64,11 +64,30 @@ def score_prediction(prediction, gold):
 
 def evaluate(dataset, config, run_dir, checkpoint_dir, split, max_calls, dry_run=False):
     import torch
+    import hashlib
+    from .evidence import SCOPE, evidence_graphs, checkpoint_path, check_checkpoint
+    if config.get("embedding_scope") != SCOPE:
+        raise ValueError("Evaluation requires the evidence-local protocol config")
+    graphs = evidence_graphs(dataset, split)
+    # Preflight before spending API calls. Load each evidence/method/seed once,
+    # then reuse its codes across all questions sharing that context.
+    cached = {}
+    for condition in config["conditions"]:
+        if condition.startswith("direct_"):
+            continue
+        for seed in config["training"]["seeds"]:
+            for context_id, graph in graphs.items():
+                path = checkpoint_path(checkpoint_dir, context_id, condition, seed)
+                checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+                check_checkpoint(checkpoint, graph, config, condition, seed)
+                codes = dict(zip(checkpoint["nodes"], checkpoint["codes"].tolist()))
+                cached[(context_id, condition, seed)] = (codes, hashlib.sha256(path.read_bytes()).hexdigest())
     run_dir = Path(run_dir)
     manifest = {"dataset_hash": digest(dataset), "config_hash": digest(config), "split": split,
                 "dry_run": dry_run, "conditions": config["conditions"],
                 "endpoint_hash": digest(os.environ.get(config["llm"]["endpoint_env"])),
-                "embedding_scope": "global_wordnet_graph_not_only_local_evidence"}
+                "embedding_scope": SCOPE,
+                "evidence_graph_hashes": {key: graph["graph_hash"] for key, graph in graphs.items()}}
     manifest_path = run_dir / "manifest.json"
     if manifest_path.exists() and read(manifest_path) != manifest:
         raise ValueError("Run directory contains incompatible inputs; use a new directory")
@@ -80,24 +99,12 @@ def evaluate(dataset, config, run_dir, checkpoint_dir, split, max_calls, dry_run
     for condition in config["conditions"]:
         seeds = [None] if condition.startswith("direct_") else config["training"]["seeds"]
         for seed in seeds:
-            codes, ckpt_hash = None, None
-            if seed is not None:
-                path = Path(checkpoint_dir) / f"{condition}-{seed}.pt"
-                checkpoint = torch.load(path, map_location="cpu", weights_only=True)
-                if checkpoint["graph_hash"] != dataset["graph_hash"]:
-                    raise ValueError("Checkpoint and QA source graph differ")
-                if checkpoint["config"]["serializer"] != config["serializer"] or checkpoint["config"]["training"] != config["training"]:
-                    raise ValueError("Checkpoint training/serializer config mismatch")
-                if checkpoint["variant"] != condition or checkpoint["seed"] != seed:
-                    raise ValueError("Mislabeled checkpoint")
-                import hashlib
-                ckpt_hash = hashlib.sha256(path.read_bytes()).hexdigest()
-                codes = {n: c for n, c in zip(checkpoint["nodes"], checkpoint["codes"].tolist())}
             for item in dataset["questions"]:
                 if item["split"] != split:
                     continue
                 if not dry_run and item["question_origin"] != "llm_generated":
                     raise ValueError("Generate real LLM questions first; template/mock questions are not research QA")
+                codes, ckpt_hash = (None, None) if seed is None else cached[(item["context_id"], condition, seed)]
                 prompt = serialize(item, condition, codes)
                 key = f"{condition}/{seed}/{item['id']}"
                 prompt_hash = digest(prompt)
@@ -110,6 +117,7 @@ def evaluate(dataset, config, run_dir, checkpoint_dir, split, max_calls, dry_run
                     return {"new_records": calls, "stopped_at_limit": True}
                 base = {"key": key, "condition": condition, "seed": seed, "question_id": item["id"],
                         "context_id": item["context_id"], "strata": item["strata"],
+                        "evidence_graph_hash": graphs[item["context_id"]]["graph_hash"],
                         "prompt_hash": prompt_hash, "checkpoint_hash": ckpt_hash,
                         "prompt": prompt, "prompt_characters": len(prompt)}
                 if dry_run:

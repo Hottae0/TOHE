@@ -8,8 +8,8 @@ from tohe.io import read, write
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--stage", required=True, choices=["prepare", "train", "specs", "generate", "evaluate", "report"])
-parser.add_argument("--config", default="configs/gpt4o-mini.json")
-parser.add_argument("--root", default="runs/main")
+parser.add_argument("--config", default="configs/qwen2.5-7b-cuda.json")
+parser.add_argument("--root", default="runs/evidence-local")
 parser.add_argument("--split", choices=["dev", "test"], default="dev")
 parser.add_argument("--max-calls", type=int, default=0, help="Required positive limit for LLM stages; excludes transient HTTP retries")
 args = parser.parse_args()
@@ -35,20 +35,10 @@ if args.stage == "prepare":
                                       "graph_hash": graph["graph_hash"]})
     print(f"Prepared {len(graph['nodes'])} nodes and {len(graph['closure'])} training pairs")
 elif args.stage == "train":
-    import torch
-    from tohe.model import train, embedding_metrics
-    graph = read(graph_path)
-    for condition in ("euclidean", "poincare", "v1", "v2"):
-        for seed in cfg["training"]["seeds"]:
-            path = checkpoints / f"{condition}-{seed}.pt"
-            if path.exists():
-                ckpt = torch.load(path, map_location="cpu", weights_only=True)
-                if ckpt["graph_hash"] != graph["graph_hash"] or ckpt["config"]["training"] != cfg["training"] or ckpt["config"]["serializer"] != cfg["serializer"]:
-                    raise ValueError(f"Existing checkpoint mismatch: {path}")
-                print(f"Reusing completed checkpoint {path}")
-            else:
-                ckpt = train(graph, cfg, condition, seed, path)
-            write(path.with_suffix(".metrics.json"), embedding_metrics(graph, ckpt))
+    from tohe.evidence import train_evidence
+    if not specs_path.exists():
+        raise FileNotFoundError("Run --stage specs first: evidence graphs must be fixed before training")
+    train_evidence(read(specs_path), cfg, checkpoints)
 elif args.stage == "specs":
     from tohe.qa import make_specs
     if specs_path.exists():

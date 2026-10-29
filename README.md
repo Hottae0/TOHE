@@ -1,132 +1,119 @@
 # TOHE experiments
 
-WordNet graph → text → frozen LLM 실험 코드입니다. 기본 7개 비교군, 고정 serializer, v1·v2 임베딩 학습, 영어 질문 생성·평가를 제공합니다. **손실항별 ablation 코드는 포함하지 않았습니다.**
+WordNet graph → text → frozen Qwen 실험입니다. **영어 질문 생성과 QA 평가 모두 Qwen/Qwen2.5-7B-Instruct를 사용**합니다. 정답은 그래프 알고리즘으로 계산합니다. LLM과 코드북은 고정하고 evidence subgraph의 노드 좌표만 학습합니다.
 
-이 저장소는 연구 구현이며, 논문 성능을 재현했거나 TOHE가 우수하다고 주장하지 않습니다. 현재 검증 범위는 [실행 기록](docs/VALIDATION.md), 방법의 구체적인 정의는 [프로토콜](docs/PROTOCOL.md), 부족한 비교와 대안 데이터셋은 [연구 검토](docs/RESEARCH_GAPS.md)에 있습니다.
+7개 조건은 direct_id, direct_bfs, direct_dfs, euclidean, poincare, v1, v2입니다. 모든 조건에 같은 직접 간선을 제공하며 임베딩 조건은 고정 규칙의 반경·방향 코드를 추가합니다. 다중 부모를 보존합니다. [프로토콜](docs/PROTOCOL.md), [실행 기록](docs/VALIDATION.md), [한계](docs/RESEARCH_GAPS.md)를 참고하세요. 손실항별 ablation은 아직 포함하지 않습니다.
 
-## 실험 구성
+## 설치
 
-| 조건 | LLM 입력 | 학습 |
-|---|---|---|
-| direct_id | ID 순서의 직접 관계 | 없음 |
-| direct_bfs | BFS 방문 순서로 배치한 모든 직접 관계 | 없음 |
-| direct_dfs | DFS 방문 순서로 배치한 모든 직접 관계 | 없음 |
-| euclidean | 같은 직접 관계 + 고정 규칙의 반경·방향 코드 | 기본 그래프 손실 |
-| poincare | 같은 직접 관계 + 고정 규칙의 반경·방향 코드 | 기본 그래프 손실 |
-| v1 | 같은 직접 관계 + v1에서 유도된 코드 | graph + radial + sector + collision |
-| v2 | 같은 직접 관계 + v2에서 유도된 코드 | graph + radial + code-structure + hard |
-
-- WordNet mammals, 상하위 방향은 **child → parent**.
-- 학습은 추이적 폐쇄, LLM facts는 직접 간선입니다. 다중 부모를 보존합니다.
-- LLM·코드북은 학습하지 않습니다. 노드 좌표를 학습합니다.
-- 기본 설정은 5차원, 300 epochs, seed 11/22/33. 학습형 코드북/VQ/RQ 없음.
-- QA 목표: 1,800개, 세 유형 각각 600개. 개발 300개 / 테스트 1,500개.
-- 같은 원본 노드에 같은 연산을 묻는 질문은 전역 중복 제거합니다. 표현 변경·ID 변경도 중복으로 취급합니다. 개발/테스트에 동일 질문은 없지만 **노드와 부분 구조는 겹칠 수 있습니다**.
-- 질문 명세와 정답은 그래프 알고리즘으로 생성하고, 영어 질문 문장은 LLM이 작성합니다. 모델 생성이 실제 완료된 항목만 `llm_generated`로 표시됩니다.
-- GPT-4o mini와 Qwen2.5-7B-Instruct는 동일한 질문 세트를 사용합니다.
-
-## 서버 설치
-
-Linux 서버의 Python 3.10 이상을 사용합니다. 작은 mammals 임베딩 학습은 CPU로 실행할 수 있습니다. Qwen 추론은 별도의 GPU 서버 또는 호스팅 endpoint를 권장합니다.
+Linux 서버에서 실행합니다. 아래 실험 가상환경은 CUDA용 PyTorch가 설치된 NGC 환경을 가정합니다.
 
 ```bash
 git clone --branch codex/wordnet-pilot https://github.com/Hottae0/TOHE.git
 cd TOHE
-python -m venv .venv
+python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
-python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+python -m pip install --upgrade pip
 python -m pip install -e .
+nvidia-smi
+python -c 'import torch; print(torch.__version__, torch.version.cuda); assert torch.cuda.is_available()'
 python -m unittest discover -s tests -v
 ```
 
-선택적으로 `docker build -t tohe .`로 CPU 실험 이미지를 만들 수 있습니다. 컨테이너에는 Qwen 서버가 포함되지 않습니다. 실행 기록은 볼륨으로 보존하세요.
+CPU로 임베딩을 학습할 때는 -cuda가 없는 config를 사용하세요. Dockerfile은 CPU 실험 코드만 포함하며 Qwen 서버는 포함하지 않습니다.
 
-## 1. 데이터 준비
+## Small과 전체
 
-```bash
-python scripts/run_experiment.py --stage prepare --config configs/gpt4o-mini.json
-python scripts/run_experiment.py --stage specs --config configs/gpt4o-mini.json
-```
+| 항목 | Small | 전체 |
+|---|---|---|
+| GPU config | configs/small-qwen2.5-7b-cuda.json | configs/qwen2.5-7b-cuda.json |
+| CPU config | configs/small-qwen2.5-7b.json | configs/qwen2.5-7b.json |
+| epochs / burn-in | 300 / 20 | 300 / 20 |
+| seeds | 11 | 11, 22, 33 |
+| evidence 수 / checkpoint 수 | 20 / 80 | 300 / 3,600 |
+| 문맥당 노드 | 20·40 | 20·40·80 |
+| QA 수 | 120 | 1,800 |
+| 개발 / 테스트 QA | 30 / 90 | 300 / 1,500 |
+| 질문 생성 요청 | 120 | 1,800 |
+| 개발 / 테스트 평가 요청 | 210 / 630 | 4,500 / 22,500 |
 
-첫 명령은 NLTK WordNet과 고정된 upstream commit의 mammals 필터를 내려받습니다. 두 번째는 중복 없는 질문 명세·알고리즘 정답을 만듭니다. **이 단계에서는 아직 LLM이 작성한 질문이 없습니다.**
+질문은 reachability, common direct parents, exact-k의 세 유형입니다. 원본 synset ID와 연산 기준으로 전역 중복 제거합니다. 개발/테스트의 노드와 부분 구조는 겹칠 수 있습니다. Small의 단일 seed 결과는 최종 연구 결과가 아닙니다.
 
-결과는 `runs/main/data/`에 저장됩니다. 준비된 데이터나 질문 세트를 실수로 덮어쓰지 않습니다. 새 실험은 `--root runs/new-study`처럼 별도 경로를 지정합니다. 모든 단계에서 같은 `--root`를 사용하세요.
+## 데이터와 임베딩 학습
 
-## 2. 네 임베딩 조건 학습
-
-```bash
-python scripts/run_experiment.py --stage train --config configs/gpt4o-mini.json
-```
-
-4조건 × 3 seeds를 학습하고 각 checkpoint의 reconstruction/code 지표를 저장합니다. 각 epoch마다 partial checkpoint와 난수 상태를 보존합니다. 중단되면 같은 명령으로 다시 실행합니다. 완료된 checkpoint는 검증 후 재사용합니다. 학습 설정을 바꾸면 새 `--root`를 사용하세요.
-
-기본 하이퍼파라미터는 시작 설정입니다. 추가 손실 가중치가 개발셋에서 최적화되었다고 주장하지 않습니다. 개발 평가로 설정을 고정한 다음 테스트를 실행하세요.
-
-## 3. LLM 설정 및 영어 질문 생성
-
-비밀 키는 저장소에 넣지 않습니다. `.env.example`을 참고해 환경변수를 설정합니다. 파일을 자동으로 읽지는 않습니다.
+영구 저장 폴더에서 실행하세요. Small과 전체는 별도 ROOT를 사용합니다. 기존 질문 생성 모델이나 학습 설정을 바꾸고 같은 실행을 재개하지 마세요.
 
 ```bash
-export OPENAI_API_KEY='YOUR_KEY'
-export TOHE_GENERATOR_ENDPOINT='https://api.openai.com/v1/chat/completions'
-export TOHE_CHAT_ENDPOINT='https://api.openai.com/v1/chat/completions'
+source .venv/bin/activate
+export CONFIG=configs/small-qwen2.5-7b-cuda.json
+export ROOT=runs/small-qwen-local-300ep
+export OMP_NUM_THREADS=4
+
+python scripts/run_experiment.py --stage prepare --config "$CONFIG" --root "$ROOT"
+python scripts/run_experiment.py --stage specs --config "$CONFIG" --root "$ROOT"
+python -u scripts/run_experiment.py --stage train --config "$CONFIG" --root "$ROOT"
 ```
 
-GPT 모델명은 재현성을 위해 `gpt-4o-mini-2024-07-18`로 지정했습니다. 계정에서 지원되는지 확인해야 합니다. 모델을 바꾸면 config에 정확한 이름을 기록하세요.
+prepare는 WordNet과 고정 upstream mammals 필터를 내려받습니다. specs는 evidence, 질문 명세, 알고리즘 정답을 고정합니다. 이 두 단계는 최초 한 번만 실행합니다.
+
+각 evidence 내부의 노드·직접 간선·로컬 추이 관계만 사용해 네 임베딩 조건을 독립 학습합니다. 같은 evidence의 여섯 질문은 checkpoint를 재사용합니다. 전체 WordNet 좌표나 외부 negative를 사용하지 않습니다. 중단되면 train만 재실행합니다. 기존 30-epoch 또는 전체 그래프 checkpoint와 호환되지 않습니다.
+
+## Qwen 서버
+
+임베딩 GPU 학습이 끝난 다음 같은 서버의 별도 터미널에서 실행하세요. vLLM의 PyTorch 의존성을 분리하기 위해 새 가상환경을 사용합니다. 아래는 GPU 메모리 24GB 이상을 시작 기준으로 한 설정이며 실제 가용 메모리와 GPU/드라이버 호환성을 확인해야 합니다. 시스템 RAM과 GPU 메모리는 다릅니다.
 
 ```bash
-python scripts/run_experiment.py --stage generate --config configs/gpt4o-mini.json --max-calls 1800
+python3 -m venv .venv-vllm
+source .venv-vllm/bin/activate
+python -m pip install --upgrade pip
+python -m pip install vllm
+mkdir -p runs/server
+python -m pip freeze > runs/server/vllm-environment.txt
+nvidia-smi > runs/server/gpu.txt
+
+vllm serve Qwen/Qwen2.5-7B-Instruct \
+  --host 127.0.0.1 --port 8000 \
+  --dtype half --max-model-len 4096 --max-num-seqs 1 \
+  --gpu-memory-utilization 0.85 --generation-config vllm --seed 11
 ```
 
-같은 명령을 다시 실행하면 완료된 문항을 건너뜁니다. 각 문항에는 모델명·원문 출력·사용 토큰·질문 명세·알고리즘 정답이 저장됩니다. 자연어 문장의 의미 검수는 별개입니다. `semantic_review=pending` 항목을 유형별로 표본 검수하세요. 평가 프롬프트에는 정답 없이 정확한 formal task specification도 포함됩니다.
+최초 실행 시 모델을 다운로드합니다. 서버가 준비된 뒤 터미널을 유지하세요. 모델 revision, vLLM/PyTorch 버전, dtype, chat template, GPU와 실행 옵션을 보존하세요. [Qwen 공식 안내](https://qwen.readthedocs.io/en/v2.5/deployment/vllm.html), [vLLM 설치 안내](https://docs.vllm.ai/en/latest/getting_started/installation/gpu/)를 참고하세요.
 
-## 4. 개발 평가 후 테스트
+## 영어 질문 생성과 개발 평가
 
-먼저 작은 호출 한도로 endpoint와 응답 형식을 확인할 수 있습니다. 같은 실행 명령을 재실행하면 이어서 평가합니다.
+원래 실험 터미널에서 실행합니다. 로컬 서버 기본 설정에는 API 키가 필요 없습니다. 인증 서버를 별도로 구성했다면 TOHE_QWEN_KEY를 export하세요. .env.example은 참고용이며 자동 로드하지 않습니다.
 
 ```bash
-python scripts/run_experiment.py --stage evaluate --config configs/gpt4o-mini.json --split dev --max-calls 30
-python scripts/run_experiment.py --stage evaluate --config configs/gpt4o-mini.json --split dev --max-calls 4500
-python scripts/run_experiment.py --stage report --config configs/gpt4o-mini.json --split dev
+export TOHE_QWEN_ENDPOINT=http://127.0.0.1:8000/v1/chat/completions
+unset TOHE_QWEN_KEY
+curl --fail http://127.0.0.1:8000/v1/models
+
+python scripts/run_experiment.py --stage generate --config "$CONFIG" --root "$ROOT" --max-calls 2
+python scripts/run_experiment.py --stage generate --config "$CONFIG" --root "$ROOT" --max-calls 120
+python scripts/run_experiment.py --stage evaluate --config "$CONFIG" --root "$ROOT" --split dev --max-calls 210
+python scripts/run_experiment.py --stage report --config "$CONFIG" --root "$ROOT" --split dev
 ```
 
-개발 단계에서 설정을 결정한 뒤 테스트를 실행합니다.
+Qwen이 영어 질문과 명세 echo를 작성하며 코드가 echo를 검증합니다. 정답은 질문 생성·평가 프롬프트에 포함하지 않습니다. semantic_review=pending 질문은 유형별로 표본 검수하세요. 모든 평가 프롬프트에는 formal task specification도 포함됩니다. 생성 temperature는 0.2, 평가 temperature는 0입니다. 동일 모델로 생성·평가하므로 문체 편향 가능성이 남습니다.
+
+## 테스트와 전체 실행
+
+개발 결과로 설정을 확정한 뒤 테스트합니다.
 
 ```bash
-python scripts/run_experiment.py --stage evaluate --config configs/gpt4o-mini.json --split test --max-calls 22500
-python scripts/run_experiment.py --stage report --config configs/gpt4o-mini.json --split test
+python scripts/run_experiment.py --stage evaluate --config "$CONFIG" --root "$ROOT" --split test --max-calls 630
+python scripts/run_experiment.py --stage report --config "$CONFIG" --root "$ROOT" --split test
 ```
 
-Direct 3조건은 seed와 무관해 한 번씩, 임베딩 4조건은 3 seeds씩 평가하므로 한 LLM당 테스트 호출은 **1,500 × (3 + 4 × 3) = 22,500회**입니다. `--max-calls`는 한 실행에서 새로 수행할 논리 요청의 상한이며, 429/일시적 서버 오류 재시도는 별도입니다. 누락·중단된 결과는 전체 결과처럼 보고하지 않습니다.
+전체 실험은 CONFIG=configs/qwen2.5-7b-cuda.json, ROOT=runs/full-qwen-local-300ep로 바꾸고 prepare → specs → train → generate → 개발 평가/보고 → 테스트 평가/보고 순서로 실행합니다. 호출 한도는 생성 1,800, 개발 4,500, 테스트 22,500입니다. GPU 학습을 다시 할 때는 기존 vLLM 서버를 먼저 종료해 메모리를 확보하세요. Small에서 전체로 자동 확대하거나 결과를 합치지 않습니다.
 
-## 5. 같은 QA로 Qwen 평가
+--max-calls는 해당 실행의 새 논리 요청 수 상한입니다. 재실행하면 완료 항목을 건너뛰며 HTTP 일시 오류 재시도는 별도입니다. 질문·설정·checkpoint가 다른 캐시는 거부합니다. 현재 클라이언트는 순차 처리합니다.
 
-GPU 서버의 별도 환경에서 [Qwen 공식 vLLM 안내](https://qwen.readthedocs.io/en/v2.5/deployment/vllm.html)를 따라 서버를 실행합니다. 최소 예:
+## 결과
 
-```bash
-vllm serve Qwen/Qwen2.5-7B-Instruct --host 127.0.0.1 --port 8000
-```
+- checkpoints/<context_id>/evidence.json: 실제 학습 evidence.
+- checkpoints/<context_id>/*.metrics.json: reconstruction/code 지표.
+- evaluation/<model>/<split>/predictions.jsonl: prompt, 응답, 정답, exact match, set F1, usage.
+- 평가 폴더의 summary.csv, paired_comparisons.json: 조건·seed·유형별 결과와 Direct ID 대비 paired 비교. 불완전 실행에는 신뢰구간을 산출하지 않습니다.
 
-모델 revision, dtype, vLLM 버전, chat template 설정은 실행 기록에 남겨야 합니다. 이 저장소는 vLLM 자체나 모델 가중치를 설치하지 않습니다. Windows 검증 환경에서는 vLLM을 실행하지 않았습니다.
-
-평가 프로세스에서는:
-
-```bash
-export TOHE_QWEN_ENDPOINT='http://127.0.0.1:8000/v1/chat/completions'
-python scripts/run_experiment.py --stage evaluate --config configs/qwen2.5-7b.json --split dev --max-calls 4500
-python scripts/run_experiment.py --stage evaluate --config configs/qwen2.5-7b.json --split test --max-calls 22500
-python scripts/run_experiment.py --stage report --config configs/qwen2.5-7b.json --split test
-```
-
-Qwen용 질문을 다시 생성하거나 임베딩을 다시 학습하지 않습니다. 같은 QA와 checkpoint를 재사용합니다. GPT와 Qwen은 별도 결과 폴더에 저장됩니다. 평가 temperature는 둘 다 0으로 고정합니다.
-
-## 결과와 점검
-
-- `checkpoints/*.metrics.json`: reconstruction, hard-code 지표, 학습 시간.
-- `evaluation/<model>/<split>/predictions.jsonl`: prompt, 응답, 정답, exact match, set F1, 실제 API 토큰 사용량.
-- `summary.csv`: 조건·seed 및 질문 유형/크기/정답 크기/k/경로 길이별 성능.
-- `paired_comparisons.json`: Direct ID 대비 paired 차이와 그래프 단위 bootstrap 구간. 불완전한 실행에는 구간을 산출하지 않습니다.
-- 토큰 usage를 제공하지 않는 endpoint에서는 토큰 수를 비워 두며 글자 수를 토큰 수로 위장하지 않습니다.
-- HTTP 오류, 모델 미설정, checkpoint 불일치, 미생성 QA는 명시적으로 중단합니다.
-
-학습 없이 코드 흐름만 확인하려면 `configs/smoke.json`과 `python -m unittest discover -s tests -v`를 사용하세요. 실제 WordNet의 짧은 개발 검증은 `python scripts/validate_wordnet.py <graph.json> <new-output-dir>`로 수행할 수 있으며 **본 실험 결과가 아닙니다**.
+실제 Qwen 서버와 300-epoch 전체 연구는 로컬 검증에서 실행하지 않았습니다. 테스트는 python -m unittest discover -s tests -v, 실제 WordNet 짧은 검증은 python scripts/validate_wordnet.py <graph.json> <new-output-dir>로 수행합니다. 후자는 LLM을 호출하지 않습니다.

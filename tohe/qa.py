@@ -138,7 +138,7 @@ def make_specs(graph, config, output):
     dev_nodes = {v for q in dataset if q["split"] == "dev" for v in q["graph"]["original_ids"].values()}
     test_nodes = {v for q in dataset if q["split"] == "test" for v in q["graph"]["original_ids"].values()}
     payload = {"graph_hash": graph["graph_hash"], "config_hash": digest(config),
-               "metadata": {"scope": "global_mammals_embeddings_local_evidence_qa",
+               "metadata": {"scope": "evidence_subgraph_only",
                             "questions": len(dataset), "contexts": contexts,
                             "semantic_duplicates": len(dataset) - len(used),
                             "exact_k_balance": "prefer_alternating_empty_nonempty_then_any_unique_source",
