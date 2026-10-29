@@ -55,3 +55,12 @@ Question generation and evaluation both use Qwen2.5-7B-Instruct through the same
 ## Structured reviewer response repair
 
 20 local tests pass. Added a regression for interpreted_spec returned as prose: it is classified as a format error, the same question is reviewed again, and a valid structured interpretation is required. A mocked HTTP transport test confirms response_format=json_schema is actually sent, and finish_reason is preserved. Review schema is generic and does not encode expected task IDs or force acceptance. Live vLLM structured decoding remains to be checked on the user's server.
+
+## Live common-parent reviewer repair — 2026-10-29
+
+- 21 local tests pass, including the supplied regression: a correct two-parent intersection sentence was interpreted as reachability to the bound variable P. That internally invalid review now preserves the candidate and retries review; balanced examples cover all three operations.
+- Directly ran the updated code on the user's Qwen2.5-7B-Instruct / vLLM 0.32.0 server. All six live controls passed: three positive task interpretations and rejection of count, shortest-distance and reversed-query negatives. A reviewer format error is not counted as a successful negative control.
+- Resumed actual small-study question generation to completion: 120/120 model-verified questions, 0 semantic duplicate queries, 0 gold mismatches on graph recomputation. The latter uses the same graph-answer implementation and is a consistency check, not an independent proof of gold correctness.
+- Preserved the two previously accepted structured-v1 questions; generated/audited the other 118 with balanced-v2. The resumed run used 246 logical requests, including five rejected attempts followed by successful regeneration. Per-question audit protocols remain explicit.
+- Manually inspected one question per task, including the exact failing common-parent sentence and g0019-q5. The latter now asks for qualifying endpoints after exactly three directed edges, not a count or shortest distance. This is sample inspection, not an exhaustive independent semantic audit.
+- Server artifacts: data/qa.audited-v3.json, data/qa-repair-validation.json, data/audited-v3-repair-run.log under the existing small run. Evidence, checkpoints and old predictions were retained. Revised development QA evaluation has not yet been run at this validation step.

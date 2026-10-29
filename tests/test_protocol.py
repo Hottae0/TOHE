@@ -141,9 +141,9 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(result["questions"][0]["semantic_review"], "model_verified_v3")
         self.assertEqual(result["questions"][0]["gold"], item["gold"])
         self.assertEqual(len(rows(output.with_suffix(".generation-failures.jsonl"))), 2)
-        review_request = json.loads(mock.call_args_list[-1].args[1][0]["content"])
-        self.assertEqual(set(review_request), {"review_instruction", "question"})
-        self.assertNotIn("gold", review_request)
+        review_request = mock.call_args_list[-1].args[1]
+        self.assertEqual(review_request[-1]["content"], valid_question)
+        self.assertNotIn(spec["source"], json.dumps(review_request[:-1]))
         cfg = dict(self.config, conditions=["direct_id"])
         with patch("tohe.pipeline.chat", return_value={"text": '{"answer": []}'}) as mock:
             evaluate(result, cfg, self.root / "eval", self.root / "unused", item["split"], 1)
@@ -170,7 +170,7 @@ class ProtocolTests(unittest.TestCase):
         with patch("tohe.audited_questions.chat", return_value=review) as mock:
             complete = generate_audited_questions(data, self.config, output, 1)
             self.assertEqual(mock.call_count, 1)
-            self.assertIn("review_instruction", json.loads(mock.call_args.args[1][0]["content"]))
+            self.assertEqual(mock.call_args.args[1][-1]["content"], canonical_question(spec))
             generate_audited_questions(data, self.config, output, 1)
             self.assertEqual(mock.call_count, 1)
         self.assertEqual(complete["metadata"]["generation_status"], "complete")
@@ -196,14 +196,34 @@ class ProtocolTests(unittest.TestCase):
         for call in mock.call_args_list[1:]:
             request_cfg, messages = call.args
             self.assertEqual(request_cfg["response_format"]["type"], "json_schema")
-            payload = json.loads(messages[0]["content"])
-            self.assertEqual(set(payload), {"review_instruction", "question"})
-        self.assertIn("previous review format error", json.loads(mock.call_args.args[1][0]["content"])["review_instruction"])
+            self.assertEqual(messages[-1]["content"], canonical_question(spec))
+        self.assertIn("previous review format error", mock.call_args.args[1][0]["content"])
         self.assertEqual(result["metadata"]["generation_status"], "complete")
         self.assertEqual(rows(output.with_suffix(".generation-failures.jsonl"))[0]["error_stage"], "review_format")
         schema_text = json.dumps(review_response_format())
         self.assertNotIn(spec["source"], schema_text)
         self.assertIn('"count"', schema_text)  # Allow a negative verdict; don't force acceptance.
+
+    def test_common_parents_reviewer_regression_preserves_valid_candidate(self):
+        data = make_specs(self.graph, self.config, self.root / "specs.json")
+        item = next(q for q in data["questions"] if q["spec"]["type"] == "common_parents")
+        data["questions"] = [item]
+        spec = item["spec"]
+        valid = dict(interpreted_spec=spec, answer_kind="node_set", edge_direction="outgoing",
+                     path_semantics="direct_neighbors", ambiguous=False)
+        invalid = dict(valid, interpreted_spec=dict(type="reachability", source=spec["left"], target="P"))
+        response = {"text": json.dumps(dict(question=canonical_question(spec), spec=spec))}
+        output = self.root / "common-regression.json"
+        with patch("tohe.audited_questions.chat", side_effect=[response, {"text": json.dumps(invalid)}, {"text": json.dumps(valid)}]) as mock:
+            result = generate_audited_questions(data, self.config, output, 3)
+        self.assertEqual(mock.call_count, 3)
+        self.assertEqual(result["questions"][0]["question"], canonical_question(spec))
+        log = rows(output.with_suffix(".generation-failures.jsonl"))
+        self.assertEqual(log[0]["error_stage"], "review_format")
+        messages = review_messages(canonical_question(spec))
+        examples = [json.loads(m["content"])["interpreted_spec"]["type"]
+                    for m in messages if m["role"] == "assistant"]
+        self.assertEqual(set(examples), {"reachability", "common_parents", "exact_k"})
 
     def test_chat_transmits_structured_response_format(self):
         cfg = dict(self.config["generation_llm"], model="test-model", endpoint_env="TOHE_TEST_ENDPOINT",
