@@ -67,6 +67,48 @@ explicitly state the reflexive convention; previously accepted wording is
 revalidated and any repaired question retains its prior audit in the failure log.
 The graph specification and learned embeddings are unchanged by wording repairs.
 
+## Verified exploratory results (2026-10-30)
+
+All 2,178 responses completed. Local reanalysis verified all 78 exported file
+hashes, recomputed graph gold and scoring, and found no missing, unexpected or
+duplicate predictions in either the new diagnostic or previous interim run.
+
+| Condition | Strict accuracy | Content-only sensitivity |
+|---|---:|---:|
+| direct_id | 46.46% | 46.46% |
+| direct_bfs | 42.42% | 42.93% |
+| direct_dfs | 43.94% | 44.44% |
+| euclidean | 30.81% | 42.93% |
+| poincare | 31.31% | 44.95% |
+| v1 | 27.27% | 39.90% |
+| v2 | 26.26% | 36.87% |
+| raw_euclidean | 20.20% | 37.88% |
+| raw_poincare | 23.23% | 40.40% |
+| raw_v1 | 24.75% | 39.39% |
+| raw_v2 | 24.24% | 38.38% |
+
+The original strict results are preserved. The last task instruction requests a
+label string/array while the common instruction requests an answer object; many
+embedding-arm relation responses used an unwrapped valid label. This exposes an
+output-format confound. Content-only sensitivity unwraps valid JSON values and
+ignores set ordering/duplicates, without ID repair, synonym mapping, explanatory
+answer extraction, gold-dependent parsing or extra LLM calls. It is post hoc,
+not a replacement preregistered metric. V1/V2 still do not outperform direct_id.
+
+Native four-candidate coordinate retrieval was 75.76% for Euclidean and 100% for
+Poincare/V1/V2 on the same 66 observed-graph questions. Native code retrieval was
+59.85%, 74.24%, 56.82%, 65.15%, respectively, with fractional tie credit. These
+are reconstruction diagnostics. They suggest information loss in the code
+mapping; they do not establish held-out QA generalization or a causal source of
+LLM errors. The input does not provide the code-direction prototypes or full
+code-distance table used by the native decoder. Raw vectors also increase prompt
+length. Format consistency and decodable metadata should be controlled before
+claiming a reasoning advantage. All 66 LCA questions happened to have one answer;
+only four of the 33 contexts have multiple parents, limiting DAG coverage.
+
+The exported archive is `TOHE-hierarchy-results-20261030.tar.gz`, SHA-256
+`5855d0071726378bc255c0d22a06cc9e57cf2125543cbd3013bc7cb967821424`.
+
 ## Server execution
 
 Use a new output root, the preserved code snapshot containing these added files,
