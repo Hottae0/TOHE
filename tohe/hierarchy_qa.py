@@ -159,6 +159,11 @@ def wording_error(text, spec):
         return "Mention every supplied node ID exactly, with no additional node IDs"
     if spec["type"] != "taxonomic_relation" and re.search(r"how many|count the|number of", text, re.I):
         return "Ask for node IDs, not a count"
+    if spec["type"] == "lowest_common_ancestors":
+        if not re.search(r"own ancestor|reflexive|zero[- ]length|zero or more", text, re.I):
+            return "Explicitly state: Treat each queried node as its own ancestor."
+        if not re.search(r"lowest|minimal|not (?:a )?strict ancestor", text, re.I):
+            return "Request minimal common ancestors, excluding strict ancestors of another common ancestor"
     return None
 
 

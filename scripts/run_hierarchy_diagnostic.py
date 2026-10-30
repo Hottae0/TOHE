@@ -28,13 +28,18 @@ def generate(dataset, cfg, path):
     qa["generation_hash"] = fingerprint
     for item in qa["questions"]:
         if item.get("semantic_review") == "model_verified_hierarchy_v1":
-            continue
+            validation_error = h.wording_error(item.get('question'), item['spec'])
+            if validation_error is None:
+                continue
+            append(path.with_suffix('.failures.jsonl'), dict(question_id=item['id'],
+                error=validation_error, stage='deterministic_revalidation_before_evaluation', prior_item=copy.deepcopy(item)))
+            item['semantic_review'] = 'pending'
         feedback = ""
         for attempt in range(1, 7):
             generation_cfg = dict(cfg["generation_llm"], response_format={"type": "json_schema", "json_schema": {
                 "name": "english_graph_question", "schema": {"type": "object", "properties": {
                     "question": {"type": "string"}}, "required": ["question"], "additionalProperties": False}}})
-            prompt = {"instruction": "Write one unambiguous English question preserving the exact specification and every output requirement. Never solve it or provide a hint about the answer. Return only JSON with question.",
+            prompt = {"instruction": "Write one unambiguous English question preserving the exact specification and every output requirement. For lowest_common_ancestors explicitly include: Treat each queried node as its own ancestor. Never solve it or provide a hint about the answer. Return only JSON with question.",
                       "spec": item["spec"], "definition": item["task_definition"],
                       "semantic_reference": h.canonical_question(item["spec"]), "previous_failure": feedback}
             response = chat(generation_cfg, [{"role": "user", "content": json.dumps(prompt)}])

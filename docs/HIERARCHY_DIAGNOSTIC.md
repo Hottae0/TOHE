@@ -56,12 +56,16 @@ diagnostics, not held-out link prediction results. Random candidate choice has
 25% expected accuracy. Constant relation-label plus empty-set baselines are also
 reported. No development outcome establishes final test performance.
 
-Validation before launch: all 29 local tests passed, including DAG multi-answer
+Validation: all 30 local tests passed, including DAG multi-answer
 LCA semantics, reflexive ancestors, relation direction, balanced/unique sampling,
 strict answer constraints, preservation of every directed fact across all 11
 conditions, and a mocked evaluation/resume/report round trip. The live server
 preflight passed on the actual 33 graphs and 132 completed checkpoints, with
 198 questions, 66 per task, 22 per relation label, and zero semantic duplicates.
+Live wording inspection added a deterministic requirement that LCA questions
+explicitly state the reflexive convention; previously accepted wording is
+revalidated and any repaired question retains its prior audit in the failure log.
+The graph specification and learned embeddings are unchanged by wording repairs.
 
 ## Server execution
 

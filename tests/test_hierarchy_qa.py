@@ -87,6 +87,9 @@ class HierarchyDiagnosticTests(unittest.TestCase):
         self.assertIsNone(h.review_error(review,spec))
         review['interpreted_spec']=dict(type=h.TASKS[1],left='N000',right='N003')
         self.assertIsNotNone(h.review_error(review,spec))
+        lca=dict(type=h.TASKS[2],left='N003',right='N006')
+        self.assertIsNotNone(h.wording_error('List all lowest common ancestors of N003 and N006.',lca))
+        self.assertIsNone(h.wording_error(h.canonical_question(lca),lca))
 
     def test_evaluation_resumes_and_reports_all_eleven_conditions(self):
         import torch
@@ -118,6 +121,28 @@ class HierarchyDiagnosticTests(unittest.TestCase):
             self.assertEqual(read(run/'verification.json')['missing'],0)
             self.assertEqual(read(run/'verification.json')['duplicates'],0)
             self.assertTrue((run/'summary.csv').exists())
+
+    def test_generation_repairs_omitted_reflexive_semantics_before_blind_review(self):
+        from tohe.io import read, rows
+        script=Path(__file__).resolve().parents[1]/'scripts/run_hierarchy_diagnostic.py'
+        module_spec=importlib.util.spec_from_file_location('hierarchy_generation_test',script)
+        runner=importlib.util.module_from_spec(module_spec); module_spec.loader.exec_module(runner)
+        spec=dict(type=h.TASKS[2],left='N003',right='N006')
+        item=dict(id='lca-test',spec=spec,graph=self.graph(),gold=['N000'],task_definition=h.DEFINITIONS[spec['type']])
+        dataset=dict(metadata=dict(generation_status='partial'),questions=[item])
+        review=dict(interpreted_spec=spec,answer_kind='node_set',edge_direction='outgoing_to_supertypes',semantics='reflexive_minimal_common_ancestors',ambiguous=False)
+        bad=dict(text=json.dumps({'question':'List all lowest common ancestors of N003 and N006.'}))
+        good=dict(text=json.dumps({'question':h.canonical_question(spec)}))
+        audit=dict(text=json.dumps(review))
+        config=dict(generation_llm=dict(endpoint_env='HIERARCHY_TEST_ENDPOINT',temperature=.2,max_output_tokens=512))
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ,{'HIERARCHY_TEST_ENDPOINT':'http://unused.local'}), mock.patch.object(runner,'chat',side_effect=[bad,good,audit]) as llm, contextlib.redirect_stdout(io.StringIO()):
+            path=Path(tmp)/'qa.json'; qa=runner.generate(dataset,config,path)
+            self.assertEqual(llm.call_count,3)
+            self.assertEqual(qa['metadata']['generation_status'],'complete')
+            self.assertIn('own ancestor',qa['questions'][0]['question'])
+            self.assertEqual(len(rows(path.with_suffix('.failures.jsonl'))),1)
+            runner.generate(dataset,config,path)
+            self.assertEqual(llm.call_count,3)
 
 
 if __name__=='__main__': unittest.main()
