@@ -1,5 +1,7 @@
 # TOHE experiments
 
+확장 실험(1,800 QA, 300 subgraph, 1 seed, 원래 좌표 포함 11조건)은 [확장 실행 안내](docs/EXPANDED_STUDY.md)를 사용하세요. 결과는 검증된 영구 마운트 아래에 저장하며, 기존 small 질문과 evidence를 제외합니다.
+
 WordNet graph → text → frozen Qwen 실험입니다. **영어 질문 생성과 QA 평가 모두 Qwen/Qwen2.5-7B-Instruct를 사용**합니다. 정답은 그래프 알고리즘으로 계산합니다. LLM과 코드북은 고정하고 evidence subgraph의 노드 좌표만 학습합니다.
 
 7개 조건은 direct_id, direct_bfs, direct_dfs, euclidean, poincare, v1, v2입니다. 모든 조건에 같은 직접 간선을 제공하며 임베딩 조건은 고정 규칙의 반경·방향 코드를 추가합니다. 다중 부모를 보존합니다. [프로토콜](docs/PROTOCOL.md), [실행 기록](docs/VALIDATION.md), [한계](docs/RESEARCH_GAPS.md)를 참고하세요. 손실항별 ablation은 아직 포함하지 않습니다.

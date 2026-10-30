@@ -11,6 +11,7 @@ parser.add_argument("--stage", required=True, choices=["prepare", "train", "spec
 parser.add_argument("--config", default="configs/qwen2.5-7b-cuda.json")
 parser.add_argument("--root", default="runs/evidence-local")
 parser.add_argument("--split", choices=["dev", "test"], default="dev")
+parser.add_argument("--exclude-specs", help="For specs: exclude prior semantic queries and evidence graphs")
 parser.add_argument("--question-mode", choices=["llm", "canonical"], default="llm",
                     help="canonical is a deterministic diagnostic; reuses evidence/checkpoints")
 parser.add_argument("--max-calls", type=int, default=0, help="Required positive limit for LLM stages; excludes transient HTTP retries")
@@ -49,7 +50,8 @@ elif args.stage == "specs":
     from tohe.qa import make_specs
     if specs_path.exists():
         raise FileExistsError("Specs already exist; keep one frozen question set for both evaluators")
-    result = make_specs(read(graph_path), cfg, specs_path)
+    result = make_specs(read(graph_path), cfg, specs_path,
+                        read(args.exclude_specs) if args.exclude_specs else None)
     print(result["metadata"])
 elif args.stage == "generate":
     if args.question_mode == "canonical":

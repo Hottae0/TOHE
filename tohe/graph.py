@@ -61,11 +61,17 @@ def path_length(graph, source, target):
     return None
 
 
-def traversal(graph, order):
+def traversal(graph, order, direction="outgoing"):
     nodes = sorted(graph["nodes"])
     if order == "id":
         return nodes
     adj = adjacency(nodes, graph["edges"])
+    if direction == "weak":
+        # Ordering only: preserve directed facts in the renderer.
+        for u, v in graph["edges"]:
+            adj[v].add(u)
+    elif direction != "outgoing":
+        raise ValueError("Unknown serialization traversal direction")
     seen, output = set(), []
     for root in nodes:
         if root in seen:

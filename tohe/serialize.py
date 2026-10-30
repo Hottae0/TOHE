@@ -43,21 +43,36 @@ Embedding metadata rules:
 - Explicit graph edges are authoritative.
 """
 
+RAW_METADATA = """
+Raw coordinate metadata rules:
+- Each node has its original learned coordinate vector; values have not been rounded or binned.
+- All vectors in this context share the same coordinate system and are fitted only to this evidence.
+- Coordinates are approximate metadata, not graph edges or node IDs.
+- Explicit graph edges remain authoritative for every answer.
+"""
+
 
 def serialize(item, condition, codes=None):
     graph = item["graph"]
     direct = condition.startswith("direct_")
+    raw = condition.startswith("raw_")
     order = condition.removeprefix("direct_") if direct else "id"
     if order not in ("id", "bfs", "dfs"):
         raise ValueError(order)
     if not direct and codes is None:
         raise ValueError("Embedding condition requires codes")
-    ordered = traversal(graph, order)
+    ordered = traversal(graph, order, item.get("serialization_traversal", "outgoing"))
     adj = adjacency(graph["nodes"], graph["edges"])
-    lines = [COMMON + ("" if direct else METADATA), "Nodes:"]
+    metadata = "" if direct else (RAW_METADATA if raw else METADATA)
+    if raw:
+        metadata += ("Coordinate space: Euclidean.\n" if condition == "raw_euclidean" else
+                     "Coordinate space: unit Poincare ball, curvature -1.\n")
+    lines = [COMMON + metadata, "Nodes:"]
     for node in ordered:
         if direct:
             lines.append(node)
+        elif raw:
+            lines.append(f"{node}: coordinates=" + json.dumps(codes[graph["original_ids"][node]], allow_nan=False))
         else:
             radial, sector = codes[graph["original_ids"][node]]
             lines.append(f"{node}: radial_bin={radial}, direction_group=g{sector}")
