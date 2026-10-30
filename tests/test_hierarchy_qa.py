@@ -144,5 +144,26 @@ class HierarchyDiagnosticTests(unittest.TestCase):
             runner.generate(dataset,config,path)
             self.assertEqual(llm.call_count,3)
 
+    def test_native_diagnostics_use_real_geometry_and_fractional_ties(self):
+        import torch
+        from tohe.io import write, read
+        script=Path(__file__).resolve().parents[1]/'scripts/run_hierarchy_diagnostic.py'
+        module_spec=importlib.util.spec_from_file_location('hierarchy_native_test',script)
+        runner=importlib.util.module_from_spec(module_spec); module_spec.loader.exec_module(runner)
+        graph=self.graph(); nodes=graph['nodes']
+        dataset=h.make_specs({'questions':[dict(context_id='g0',split='dev',graph=graph,spec=dict(type='reachability',source='N019',target='N000'))]})
+        cfg=read(Path(__file__).resolve().parents[1]/'configs/expanded-qwen2.5-7b-cuda.json')
+        ckpt=dict(nodes=nodes,codes=torch.zeros((len(nodes),2),dtype=torch.int64),embeddings=torch.zeros((len(nodes),5),dtype=torch.float64))
+        cache={('g0',v):(ckpt,'fixed-'+v) for v in ('euclidean','poincare','v1','v2')}
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            for v in ('euclidean','poincare','v1','v2'):
+                write(root/'g0'/f'{v}-11.metrics.json',dict(map=.5,hard_code_triplet_accuracy=.5))
+            runner.embedding_diagnostics(dataset,cfg,root,cache,root/'native.json')
+            result=read(root/'native.json')
+            for v in ('euclidean','poincare','v1','v2'):
+                self.assertEqual(result['by_variant'][v]['means']['candidate_coordinate_accuracy'],.25)
+                self.assertEqual(result['by_variant'][v]['means']['candidate_code_accuracy'],.25)
+
 
 if __name__=='__main__': unittest.main()

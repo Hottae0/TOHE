@@ -125,7 +125,7 @@ def token_budget(qa, cfg, checkpoint_root, path):
 
 
 def embedding_diagnostics(dataset, cfg, checkpoint_root, cache, output):
-    from tohe.geometry import distance, FixedSerializerGeometry
+    from tohe.model import distance, FixedSerializerGeometry
     groups = collections.defaultdict(list)
     for (cid, variant), (ckpt, _) in cache.items():
         metrics_path = checkpoint_path(checkpoint_root, cid, variant, 11).with_suffix('.metrics.json')

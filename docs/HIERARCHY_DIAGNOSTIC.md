@@ -56,7 +56,7 @@ diagnostics, not held-out link prediction results. Random candidate choice has
 25% expected accuracy. Constant relation-label plus empty-set baselines are also
 reported. No development outcome establishes final test performance.
 
-Validation: all 30 local tests passed, including DAG multi-answer
+Validation: all 31 local tests passed, including DAG multi-answer
 LCA semantics, reflexive ancestors, relation direction, balanced/unique sampling,
 strict answer constraints, preservation of every directed fact across all 11
 conditions, and a mocked evaluation/resume/report round trip. The live server
